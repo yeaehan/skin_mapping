@@ -1,0 +1,90 @@
+---
+title: "1_Seurat_CellTypeAnnotation_CODEX"
+output: html_document
+date: "2025-10-31"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align='center', fig.width=12, fig.height = 8)
+```
+
+```{r warning=FALSE, message=FALSE}
+library(Seurat)
+library(tidyverse)
+library(magrittr)
+library(ggplot2)
+library(patchwork)
+library(sctransform)
+library(cowplot)
+library(harmony)
+
+require(future)
+availableCores()
+plan("multisession", workers = 4)
+options(future.globals.maxSize = 8000 * 1024^2)
+```
+
+```{r}
+
+samples <- list.files("//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/0_james/projects/Xenium/Xenium_files")
+clean_samples <- samples[!grepl("\\.zarr$", samples)]
+
+sm_folders <- (paste0("//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/0_james/projects/Xenium/Xenium_files/", clean_samples, "/cell_feature_matrix"))
+
+sceList <- function(x, y){
+    counts_matrix <- Read10X(data.dir = x)[['Gene Expression']]
+    
+    # 3. Manually fix the row names that Read10X is failing to clean
+    #    This replaces all underscores with dashes
+    rownames(counts_matrix) <- gsub("_", "-", rownames(counts_matrix))
+
+      tmp_obj <- CreateSeuratObject(
+      counts = (counts_matrix),
+      min.cells = 3, 
+      project = y)
+    
+    #tmp_obj[["percent.mt"]] <- PercentageFeatureSet(object = tmp_obj, pattern = "^mt-")
+    #tmp_obj <- subset(tmp_obj, subset = nFeature_RNA > 200 & percent.mt < 20)
+    #tmp_obj <- subset(tmp_obj, subset = nFeature_RNA > 200 )
+    require(future)
+    plan("multisession", workers = 4)
+    options(future.globals.maxSize = 10000 * 1024^2)
+    tmp_obj <- NormalizeData(tmp_obj, normalization.method = "LogNormalize", scale.factor = 10000)
+    tmp_obj <- FindVariableFeatures(tmp_obj, selection.method = "vst", nfeatures = 4000)
+    tmp_obj <- ScaleData(tmp_obj, features = rownames(tmp_obj))
+    tmp_obj <- RunPCA(tmp_obj, features = VariableFeatures(tmp_obj), npcs = 50)
+    return(tmp_obj)
+}
+
+Y1738 <- sceList(sm_folders[1], samples[1])
+saveRDS(Y1738, file = "//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data/1_DoubleFinder_Y1738.rds")
+rm(Y1738)
+Y1883 <- sceList(sm_folders[2], samples[2])
+saveRDS(Y1883, file = "//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data/1_DoubleFinder_Y1883.rds")
+rm(Y1883)
+Y7503 <- sceList(sm_folders[6], samples[6])
+saveRDS(Y7503, file = "//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data/1_DoubleFinder_Y7503.rds")
+rm(Y7503)
+O4890 <- sceList(sm_folders[3], samples[3])
+saveRDS(O4890, file = "//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data/1_DoubleFinder_O4890.rds")
+rm(O4890)
+O4891 <- sceList(sm_folders[4], samples[4])
+saveRDS(O4891, file = "//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data/1_DoubleFinder_O4891.rds")
+rm(O4891)
+O5138 <- sceList(sm_folders[5], samples[5])
+saveRDS(O5138, file = "//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data/1_DoubleFinder_O5138.rds")
+rm(O5138)
+
+
+
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

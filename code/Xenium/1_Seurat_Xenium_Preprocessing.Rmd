@@ -1,0 +1,792 @@
+---
+title: "1_Seurat_Xenium_Preprocessing"
+output: html_document
+date: "2025-10-31"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align='center', fig.width=12, fig.height = 8)
+```
+
+```{r warning=FALSE, message=FALSE}
+install.packages('arrow')
+
+library(Seurat)
+library(tidyverse)
+library(dplyr)
+library(magrittr)
+library(ggplot2)
+library(patchwork)
+library(sctransform)
+library(cowplot)
+library(harmony)
+
+library(Seurat)
+library(sf)
+library(ggplot2)
+
+library(DoubletFinder)
+
+
+require(future)
+availableCores()
+plan("multisession", workers = 4)
+options(future.globals.maxSize = 8000 * 1024^2)
+```
+
+```{r}
+
+load("data/20251106.RData")
+load("data/20251106_1.RData")
+save.image("data/20251106_1.RData") #251210
+
+samples <- list.files("//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data/xenium")
+clean_samples <- samples[!grepl("\\.zarr$", samples)]
+
+sm_folders <- (paste0("//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data/xenium/", clean_samples))
+
+stList <- list()
+
+for (i in seq_along(clean_samples)) {
+  print(i)
+  stList[[i]] <- LoadXenium(sm_folders[i],
+                         fov = "fov", segmentations="cell", flip.xy=TRUE)
+  stList[[i]]$sample <- clean_samples[i]
+  stList[[i]]$age <- ifelse(grepl("_Y", clean_samples[i]), "Young", "Old")
+}
+
+#Without any filtering, Check the spot numbers of each section
+lapply(stList, ncol) %>% unlist()
+
+tmp = stList[[1]]
+ImageFeaturePlot(tmp, features = "nCount_Xenium")
+
+
+
+```
+
+```{r}
+plots = list()
+for (i in seq_along(stList)) {
+    plots[[i]] = ImageFeaturePlot(stList[[i]], features = "nCount_Xenium")
+}
+wrap_plots(plots, ncol = 4)
+```
+
+```{r}
+# based on the histogram plot, here we choose 20 transcript counts as lower cutoff
+
+plots = list()
+
+for (i in seq_along(stList)) {
+    plots[[i]] = hist(stList[[i]]$nCount_Xenium, xlim=c(0,200), breaks = 5000)
+    abline(v = 10, col="red")
+}
+wrap_plots(plots, ncol = 3)
+
+for (i in seq_along(stList)) {
+    stList[[i]]<- subset(stList[[i]], subset = nCount_Xenium >= 10)
+}
+
+hsskin.ST <- merge(stList[[1]], 
+                    y = stList[2:length(stList)], 
+                    add.cell.ids = clean_samples, 
+                    project = "hsskin.ST")
+
+
+
+```
+
+
+
+
+## 2.5 Plotting after filtering
+```{r fig.height=12}
+VlnPlot(
+  hswound.ST,
+  features = c("nFeature_Spatial", "nCount_Spatial", "percent.mt", "percent.ribo", "percent.hb", "percent.malat1"),
+  ncol = 2, pt.size=0)
+```
+
+## 2.6 FeaturePlots after filtering
+```{r fig.height=8}
+samples <- unique(hswound.ST$Sample_name)
+for (i in samples) {
+    plot_list <- SpatialFeaturePlot(hswound.ST[, hswound.ST$Sample_name == i], images = i, features = c("nFeature_Spatial", "nCount_Spatial", "percent.mt", "percent.ribo", "percent.hb", "percent.malat1"), ncol = 3)
+    print(paste0("Ploting quality metrics of ", i))
+    print(plot_list)
+}
+```
+
+
+#######################################################
+# Step 3: Preliminary clustering (no batch-correction)
+#######################################################
+## 3.1 Run sctransform, pca, clustering, umap
+```{r}
+hswound.ST <- SCTransform(hswound.ST, assay = "Spatial", verbose = FALSE)
+hswound.ST <- RunPCA(hswound.ST, assay = "SCT", verbose = FALSE)
+hswound.ST <- FindNeighbors(hswound.ST, reduction = "pca", dims = 1:30)
+hswound.ST <- FindClusters(hswound.ST, resolution = 0.5)
+hswound.ST <- RunUMAP(hswound.ST, reduction = "pca", dims = 1:30)
+```
+
+
+```{r fig.height=5, fig.width= 5}
+
+hsskin.ST <- FindNeighbors(hsskin.ST, reduction = "pca", dims = 1:20, k.param= 100)
+hsskin.ST <- RunUMAP(hsskin.ST, reduction = "pca", dims = 1:20, n.neighbors= 100, min.dist=0.5)
+hsskin.ST <- FindClusters(hsskin.ST, resolution = 0.5)
+
+DimPlot(hsskin.ST)
+```
+
+```{r}
+DimPlot(hsskin.ST, group.by = c("sample", "age"))
+```
+
+
+
+```{r}
+hsskin.ST <- IntegrateLayers(hsskin.ST, method = HarmonyIntegration,
+                             orig = "pca", new.reduction = "harmony",
+                             dims = 1:30)
+
+# UMAP analysis based on batch-corrected Harmony space
+# runtime: 1min
+hsskin.ST <- RunUMAP(hsskin.ST, reduction = "harmony", dims = 1:30,
+                    return.model = TRUE, verbose = FALSE, , n.neighbors=100)
+
+hsskin.ST <- FindNeighbors(hsskin.ST, reduction = "harmony", dims = 1:30,  k.param= 100)
+hsskin.ST <- FindClusters(hsskin.ST, resolution = 0.5, verbose = FALSE)
+
+DimPlot(hsskin.ST, group.by = c("sample", "age"))
+Idents(hsskin.ST) <- 'SCT_snn_res.0.5'
+
+DimPlot(hsskin.ST, label = TRUE)
+
+```
+
+```{r}
+
+
+# UMAP analysis based on batch-corrected Harmony space
+# runtime: 1min
+hsskin.ST <- RunUMAP(hsskin.ST, reduction = "harmony", dims = 1:30,
+                    return.model = TRUE, verbose = FALSE, , n.neighbors=100)
+
+hsskin.ST <- FindNeighbors(hsskin.ST, reduction = "harmony", dims = 1:30,  k.param= 100)
+hsskin.ST <- FindClusters(hsskin.ST, resolution = 0.7, verbose = FALSE)
+
+
+Idents(hsskin.ST) <- 'SCT_snn_res.0.7'
+DimPlot(hsskin.ST, label = TRUE)
+
+all.markers <- FindAllMarkers(hsskin.ST, only.pos = TRUE, ident= )
+
+# Save the 'all.markers' data frame to a file named "all_markers.csv"
+write.csv(all.markers, file = "results/all_markers_0.7.csv", row.names = FALSE)
+
+
+hsskin.ST <- FindClusters(hsskin.ST, resolution = 1.0, verbose = FALSE)
+
+Idents(hsskin.ST) <- 'SCT_snn_res.1'
+DimPlot(hsskin.ST, label = TRUE)
+DimPlot(hsskin.ST, label = TRUE)
+
+all.markers <- FindAllMarkers(hsskin.ST, only.pos = TRUE, ident=)
+
+# Save the 'all.markers' data frame to a file named "all_markers.csv"
+write.csv(all.markers, file = "results/all_markers_1.csv", row.names = FALSE)
+
+```
+
+
+```{r}
+prep_FindMarkers <- function(obj, num_slices = 6) {
+  # Loop through total number slices
+  for (i in 1:num_slices) {
+    slot(object = obj@assays$SCT@SCTModel.list[[i]], name = "umi.assay") <- "Xenium"
+  }
+  obj <- obj %>% PrepSCTFindMarkers()
+  # Return the modified obj
+  return(obj)}
+
+hsskin.ST<- prep_FindMarkers(hsskin.ST)
+
+# calculate marker genes for each cluster
+all.markers <- FindAllMarkers(hsskin.ST, only.pos = TRUE)
+
+# Save the 'all.markers' data frame to a file named "all_markers.csv"
+write.csv(all.markers, file = "results/all_markers.csv", row.names = FALSE)
+
+top10 <- all.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_log2FC)
+a=DoHeatmap(hsskin.ST, features = top10$gene, slot='data')
+
+a <- DoHeatmap(hsskin.ST, features = unique(top10$gene))
+ggsave("heatmap.png", plot = a, width = 20, height = 20, dpi = 100)
+
+DotPlot(hsskin.ST, features = unique(top10$gene), cols = c("blue", "red"), dot.scale = 2) +
+  
+  # 2. Improve Readability (optional but recommended)
+  # Transpose the plot for better gene label viewing
+  RotatedAxis() +
+  
+  # 3. Add a Title (optional)
+  labs(title = "Top 10 Markers per Cluster")
+
+```
+
+
+```{r}
+cc <- scale_color_gradientn(colors = c("grey", "yellow", "red", "black"))
+small.leg <- theme(legend.text = element_text(size = 6), legend.key.width = unit(0.1, "cm"))
+
+canonical_markers <- list(
+  'Keratinocytes' = c('KRT5', 'KRT14', 'KRT1', 'KRT10'),
+  'Fibroblasts' = c('COL1A1', 'DCN'),
+  'Melanocyte' = c('MLANA'),
+  'Endothelial-cells' = c('VWF', 'SOX17'),
+  'Immune cells' = c('CD34'),
+  'T-cells' = c('CD3D'),
+  'Dendritic-cells' = c('CD74')
+)
+
+
+canonical_markers <- list(
+  'Keratinocytes' = c('KRT5', 'KRT14', 'KRT10'), 
+  'Fibroblasts' = c('COL1A1', 'COL1A2', 'LUM'), 
+  'Melanocytes' =	c('PMEL',	'MLANA', 'TYRP1'), 
+  'Endothelial-cells' = c('PECAM1', 'VWF', 'EGFL7'), 
+  'Myeloid-cells' = c('LYZ', 'HLA-DRA', 'HLA-DRB1'), 
+  'Mono-mac' = c('CD68', 'CD163', 'CD14'), #In dermis  
+  'Macrophages' = c('CD209', 'FCGR2A', 'MRC1'), #CD209, FCGR2A aka CD32 or FCGR1A aka CD64, 
+  #MRC1 aka CD206 (markers of macrophages, immature dendritic cells)
+  'T-cells' = c('CD7', 'CD3D', 'CD3E'), 
+  'T-cells2' = c('CD4', 'CD8A', 'NKG7'), 
+  'B-cells' = c('MS4A1', 'CD79A', 'CD19'), 
+  'Plasma-cells' = c('JCHAIN', 'IGHG1', 'MZB1'), 
+  'LC-cells' = c('CD207', 'CD1A'), #Primarily located in epidermis (CD1A aka CD1)  
+  'Dendritic-cells' = c('CD1C', 'CD1B', 'ITGAX'), #immature DC primarily located in superior dermis (ITGAX aka CD11C)
+  'Dendritic-cells2' = c('CD83', 'LAMP3', 'THBD'), #mature DC: LAMP3 aka CD208, THBD aka CD141
+  'Dendritic-cells3' = c('CLEC9A'), #CLEC9A aka DNGR1, a Dendritic Cell-Specific Sensor 
+  'Schwann' = c('SOX10', 'SOX2'), 
+  'PC-vSMC' = c('ACTA2', 'MCAM'), 
+  'Epithelial_Mesenchymal' = c('EPCAM', 'PDGFRB')
+)
+plot_list <- FeaturePlot(
+  hsskin.ST,
+  features=unlist(canonical_markers),
+  combine=FALSE
+)
+
+
+# apply theme to each feature plot
+for(i in 1:length(plot_list)){
+  plot_list[[i]] <- plot_list[[i]] + NoAxes() + cc + small.leg
+}
+
+p_keratinocytes <- cowplot::plot_grid(plotlist = plot_list[1:4], ncol = 3) + 
+  draw_figure_label(label = "Keratinocytes", size = 8, fontface = "bold", position = "top.right")
+
+p_fibroblasts <- cowplot::plot_grid(plotlist = plot_list[5:6], ncol = 3) + 
+  draw_figure_label(label = "Fibroblasts", size = 8, fontface = "bold", position = "top.right")
+
+p_melanocyte <- cowplot::plot_grid(plotlist = plot_list[7], ncol = 3) + 
+  draw_figure_label(label = "Melanocyte", size = 8, fontface = "bold", position = "top.right")
+
+p_endothelial <- cowplot::plot_grid(plotlist = plot_list[8:9], ncol = 3) + 
+  draw_figure_label(label = "Endothelial-cells", size = 8, fontface = "bold", position = "top.right")
+
+p_immune <- cowplot::plot_grid(plotlist = plot_list[10], ncol = 3) + 
+  draw_figure_label(label = "Immune cells", size = 8, fontface = "bold", position = "top.right")
+
+p_tcells <- cowplot::plot_grid(plotlist = plot_list[11], ncol = 3) + 
+  draw_figure_label(label = "T-cells", size = 8, fontface = "bold", position = "top.right")
+
+p_dendritic <- cowplot::plot_grid(plotlist = plot_list[12], ncol = 3) + 
+  draw_figure_label(label = "Dendritic-cells", size = 8, fontface = "bold", position = "top.right")
+
+library(patchwork)
+
+final_plot <- cowplot::plot_grid(
+  p_keratinocytes,
+  p_fibroblasts,
+  p_melanocyte,
+  p_endothelial,
+  p_immune,
+  p_tcells,
+  p_dendritic,
+  ncol = 2  # <-- Change this to 2 or 3
+)
+
+print(final_plot)
+```
+
+```{r}
+
+cell_type_major <- c(
+    "0"  = "Keratinocyte", 
+    "1"  = "Fibroblast", 
+    "2"  = "Keratinocyte", 
+    "3"  = "Endothelial Cell", 
+    "4"  = "T-Cell", 
+    "5"  = "Keratinocyte", 
+    "6"  = "Epithelial Cell", 
+    "7"  = "Epithelial Cell", 
+    "8"  = "Dendritic Cell", 
+    "9"  = "Plasma Cell", 
+    "10" = "T-Cell", 
+    "11" = "Melanocyte", 
+    "12" = "Epithelial Cell", 
+    "13" = "Langerhans Cell", 
+    "14" = "Smooth Muscle Cell", 
+    "15" = "Proliferating Cell", 
+    "16" = "Mast Cell", 
+    "17" = "Stromal/Endothelial/Lymphatic-related"
+)
+
+# 2. Assign the new cell type labels to the metadata slot of the Seurat object
+# Note: The mapping vector name 'cell_type_major' is used here to be consistent 
+# with the definition above.
+
+hsskin.ST@meta.data$cell_type_major1 <- cell_type_major[
+    as.character(hsskin.ST@meta.data$SCT_snn_res.0.7)
+]
+
+hsskin.ST@meta.data$cell_type_major <- cluster_to_celltype_map2[
+as.character(hsskin.ST@meta.data$SCT_snn_res.0.7)
+
+new_cluster_ids <- c("Fibroblast", "Keratinocyte","Keratinocyte", "Corneocyte", "Endothelial",
+                     "Keratinocyte", "T cell", "Fibroblast", "Dendritic-cells", "Plasma-cells",
+                     "Melanocyte", "Epithelial_Mesenchymal?", "LC-cells", "PC-vSMC", "Mast Cell",
+                     "Endothelial Cell") # List of new cluster IDs
+# Changing IDs to cell type and add the cell type into metadata
+Idents(wds_kc) <- plyr::mapvalues(x=Idents(wds_kc), from=current_cluster_ids, to=new_cluster_ids)
+
+
+
+```
+
+
+```{r}
+cell_type_minor <- c(
+    "0"  = "Basal/Suprabasal Keratinocyte",           # 4469
+    "1"  = "Fibroblast",                              # 4299
+    "2"  = "Differentiated Keratinocyte",             # 4169
+    "3"  = "Endothelial Cell",                        # 2523
+    "4"  = "T Cell",                                  # 2063
+    "5"  = "Keratinocyte/Sebocyte",                   # 1913
+    "6"  = "Epithelial/Progenitor Cell",              # 1808
+    "7"  = "Epithelial Cell/Fibroblast",              # 1790
+    "8"  = "Dendritic Cell / cDC2",                   # 1597
+    "9"  = "Plasma Cell",                             # 1493
+    "10" = "T-Cell/Myeloid Hybrid or Macrophage",     # 1276
+    "11" = "Melanocyte",                              # 1200
+    "12" = "Epithelial Cell (Progenitor/Tumor-like)", # 931
+    "13" = "Langerhans Cell",                         # 930
+    "14" = "Smooth Muscle Cell",                      # 722
+    "15" = "Proliferating Cell",                      # 696
+    "16" = "Mast Cell",                               # 396
+    "17" = "Stromal/Endothelial/Lymphatic-related"    # 274
+)
+
+cell_type_minor <- c(
+    "0"  = "Basal/Suprabasal Keratinocyte",           # 4469
+    "1"  = "Fibroblast",                              # 4299
+    "2"  = "Differentiated Keratinocyte",             # 4169
+    "3"  = "Endothelial Cell",                        # 2523
+    "4"  = "T Cell",                                  # 2063
+    "5"  = "Keratinocyte/Sebocyte",                   # 1913
+    "6"  = "Epithelial/Progenitor Cell",              # 1808
+    "7"  = "Epithelial Cell/Fibroblast",              # 1790
+    "8"  = "Dendritic Cell / cDC2",                   # 1597
+    "9"  = "Plasma Cell",                             # 1493
+    "10" = "T-Cell/Myeloid Hybrid or Macrophage",     # 1276
+    "11" = "Melanocyte",                              # 1200
+    "12" = "Epithelial Cell (Progenitor/Tumor-like)", # 931
+    "13" = "Langerhans Cell",                         # 930
+    "14" = "Smooth Muscle Cell",                      # 722
+    "15" = "Basal Stem Cell",                      # 696
+    "16" = "Mast Cell",                               # 396
+    "17" = "Stromal/Endothelial/Lymphatic-related"    # 274
+)
+
+# 2. Assign the new 'cell_type_minor' labels to the metadata slot of the Seurat object
+# This maps the cluster IDs in SCT_snn_res.0.7 to the new, more specific cell type names.
+hsskin.ST@meta.data$cell_type_minor <- cell_type_minor[
+    as.character(hsskin.ST@meta.data$SCT_snn_res.0.7)
+]
+```
+
+
+## 3.2 PCA plot
+```{r fig.height=6, fig.width=8}
+ElbowPlot(hswound.ST, ndims = 50, reduction = "pca")
+```
+```{r fig.height=18}
+VizDimLoadings(hswound.ST, dims = 1:12, reduction = "pca")
+```
+
+## 3.3 Dim plot
+```{r fig.height=8}
+hswound.ST$Sample_name <- factor(hswound.ST$Sample_name, levels = unique(hswound.ST@meta.data$Sample_name))
+p1 = DimPlot(hswound.ST, group.by = "Donor") + NoAxes()
+p2 = DimPlot(hswound.ST, group.by = "Condition") + NoAxes()
+sm.color <- cl.colors[1:16]
+names(sm.color) <- unique(hswound.ST$Sample_name)
+
+p3 = DimPlot(hswound.ST, group.by = "Sample_name", cols = sm.color) + NoAxes()
+pdf("st_Fig_1_withoutHarmony.pdf", useDingbats = F, width = 12, height = 8)
+wrap_plots(list(p1, p2, p3), ncol = 2)
+dev.off()
+
+DimPlot(hswound.ST, reduction = "umap", group.by = c("Sample_name", "Donor", "Condition"), ncol = 2)
+
+SpatialDimPlot(hswound.ST) + plot_layout(ncol = 4)
+```
+```{r fig.height=5}
+DimPlot(hswound.ST, reduction = "umap", group.by = "seurat_clusters", pt.size = .001, split.by = 'Donor', label = TRUE) + NoLegend() + ggtitle("Clusters by each donor")
+```
+```{r fig.height=5}
+DimPlot(hswound.ST, reduction = "umap", group.by = "seurat_clusters", pt.size = .001, split.by = 'Condition', label = TRUE) + NoLegend() + ggtitle("Clusters by each condition")
+```
+```{r fig.height=5}
+DimPlot(hswound.ST, reduction = "umap", group.by = "seurat_clusters", pt.size = .001, split.by = 'Seq_Batch', label = TRUE) + NoLegend() + ggtitle("Clusters by sequencing batch")
+```
+
+## 3.4 SpatialDim plot
+```{r fig.height=12}
+SpatialDimPlot(hswound.ST) + plot_layout(ncol = 4)
+```
+
+## 3.5 Plots for those metrics of quality
+```{r}
+# Determine metrics to plot present in hswound.STcom@meta.hswound.ST
+metrics <- c("nCount_Spatial", "nFeature_Spatial", "percent.mt")
+
+p3 <- FeaturePlot(
+  hswound.ST,
+  features = metrics,
+  cols = c("gray","red"), combine = FALSE)
+p2_list <- lapply(p3, function(x) {x + NoAxes() + theme(text = element_text(size = 10))})
+cowplot::plot_grid(plotlist = p2_list, ncol = 2)
+VlnPlot(hswound.ST, features = metrics, group.by='seurat_clusters', pt.size = 0, ncol = 2)
+```
+
+## Integrate all
+```{r}
+hswound.ST@active.assay <- 'Spatial'
+p = SpatialDimPlot(hswound.ST, combine = F)
+wrap_plots(p, ncol = 4)
+
+samples = unique(hswound.ST$Sample_name)
+force = FALSE  #Set to true to rerun all calculations, otherwise will load saved files
+
+# define color scale for clusters
+cl.colors = c("#e6194B", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4", "#42d4f4",
+    "#f032e6", "#bfef45", "#fabed4", "#469990", "#dcbeff", "#9A6324", "#fffac8",
+    "#800000", "#aaffc3", "#808000", "#ffd8b1", "#000075", "#a9a9a9", "#000000")
+names(cl.colors) = as.character(0:20)
+
+ct.colors = c(RColorBrewer::brewer.pal(12, "Paired"), "cyan", "hotpink", "gray")
+
+hswound.list <- SplitObject(hswound.ST, split.by = "Sample_name")
+#Be careful that the image slots will contain 16 images, we need to filter them out
+#hswound.list$Donor1_Skin@images
+for (i in 1:length(names(hswound.list))) {
+  print(names(hswound.list)[i])
+  hswound.list[[i]]@images[setdiff(1:length(names(hswound.list)), i)] = NULL #remove unneeded images
+  hswound.list[[i]] <- SCTransform(hswound.list[[i]], assay = "Spatial", verbose = FALSE)
+  hswound.list[[i]] <- RunPCA(hswound.list[[i]], assay = "SCT")
+}
+
+vg = lapply(hswound.list, VariableFeatures)
+
+# with all 3K genes
+t = table(unlist(vg))
+hist(t, main = "Number of datasets per variable gene (top 3K)")
+
+vg.cond = list()
+for (cond in unique(hswound.ST$Condition)) {
+    m = grep(cond, names(vg))
+    t = table(unlist(vg[m]))
+    vg.cond[[cond]] = names(t)[t >= 3]
+}
+
+vg.all = unique(unlist(vg.cond))
+length(vg.all)
+
+# filter to only have genes detected in all sections.
+rn = lapply(hswound.list, rownames)
+nE = colSums(Reduce(rbind, lapply(rn, function(x) vg.all %in% x)))
+vg.all = vg.all[nE == length(hswound.list)]
+length(vg.all)
+
+options(future.globals.maxSize = 15000 * 1024^2)  # set allowed size to 4K MiB
+hswound.list <- PrepSCTIntegration(object.list = hswound.list, anchor.features = vg.all, verbose = FALSE)
+
+data.merged <- merge(hswound.list[[1]], y = c(hswound.list[2:length(hswound.list)]), merge.data = TRUE)
+data.merged$individual_clust = data.merged$seurat_clusters
+```
+
+## Batch correction
+```{r}
+VariableFeatures(data.merged) <- vg.all
+gc(verbose = F)
+data.merged <- RunPCA(object = data.merged, assay = "SCT", npcs = 40, verbose = F)
+data.int <- RunHarmony(data.merged, assay.use = "SCT", reduction = "pca", dims.use = 1:40,
+    group.by.vars = "Sample_name", plot_convergence = TRUE, verbose = T)
+
+rm(data.merged);invisible(gc(verbose = F))
+# run pca,umap,clustering.
+data.int = RunUMAP(data.int, dims = 1:40, assay = "SCT", reduction = "harmony", spread = 1.5,
+    min.dist = 0.1, verbose = F)
+data.int = FindNeighbors(data.int, dims = 1:40, assay = "SCT", reduction = "harmony",
+    verbose = F)
+data.int = FindClusters(data.int, resolution = 0.5, verbose = F)
+
+p1 = DimPlot(data.int, group.by = "Donor") + NoAxes()
+p2 = DimPlot(data.int, group.by = "Condition") + NoAxes()
+p3 = DimPlot(data.int, group.by = "seurat_clusters", label = T, cols = cl.colors) +
+    NoAxes()
+p4 = DimPlot(data.int, group.by = "Sample_name") + NoAxes()
+wrap_plots(list(p1, p2, p3, p4), ncol = 2)
+
+table(data.int$seurat_clusters)
+
+plots = SpatialDimPlot(data.int, stroke = 0, combine = F, cols = cl.colors)
+wrap_plots(plots, ncol = 4)
+
+ggplot(data.int@meta.data, aes(x = seurat_clusters, fill = Donor)) + geom_bar(position = "fill")
+
+ggplot(data.int@meta.data, aes(x = seurat_clusters, fill = Condition, alpha = Donor)) +
+    geom_bar(position = "fill")
+```
+
+```{r eval=FALSE}
+DefaultAssay(data.int) <- "Spatial" #DE for all genes instead of only using variable gene
+
+data.int <- NormalizeData(data.int, verbose = TRUE,  normalization.method = "LogNormalize", scale.factor = 10000)
+
+####----FindAllMarkers for all clusters----####
+markers <- FindAllMarkers(data.int, only.pos = TRUE, assay = "Spatial") 
+
+annot <- readRDS("./Functions/humanAnnotation.rds")
+####----add the info and reorder the columns----####
+markers_f <- markers %>% left_join(., annot, by=c("gene" = "external_gene_name")) %>% 
+  dplyr::select(6, 7, 2:4, 1, 5, everything()) %>% arrange(cluster, desc(avg_log2FC))
+
+variable.genes <- VariableFeatures(data.int, assay="SCT") %>% as.data.frame() %>% rename("gene" = ".") %>% 
+  mutate(VariableGene = "Yes")
+####----Add the information about if the gene is the variable gene----####
+markers_f <- markers_f %>% left_join(., variable.genes, by=c("gene" = "gene"))
+data.table::fwrite(markers_f, file="Seurat_STseq_integrated_markerGene.txt", sep="\t")
+```
+
+
+## Check some known cell type markers
+### Well-known cell type markers
+```{r eval=TRUE, fig.height=4, fig.width=12}
+####----Marker genes----####
+cc <- scale_color_gradientn(colors = c("grey", "yellow", "red", "black"))
+small.leg <- theme(legend.text = element_text(size = 6), legend.key.width = unit(0.1, "cm"))
+
+canonical_markers <- list(
+  'Keratinocytes' = c('KRT5', 'KRT14', 'KRT10'), 
+  'Fibroblasts' = c('COL1A1', 'COL1A2', 'LUM'), 
+  'Melanocytes' =	c('PMEL',	'MLANA', 'TYRP1'), 
+  'Endothelial-cells' = c('PECAM1', 'VWF', 'EGFL7'), 
+  'Myeloid-cells' = c('LYZ', 'HLA-DRA', 'HLA-DRB1'), 
+  'Mono-mac' = c('CD68', 'CD163', 'CD14'), #In dermis  
+  'Macrophages' = c('CD209', 'FCGR2A', 'MRC1'), #CD209, FCGR2A aka CD32 or FCGR1A aka CD64, 
+  #MRC1 aka CD206 (markers of macrophages, immature dendritic cells)
+  'T-cells' = c('CD7', 'CD3D', 'CD3E'), 
+  'T-cells2' = c('CD4', 'CD8A', 'NKG7'), 
+  'B-cells' = c('MS4A1', 'CD79A', 'CD19'), 
+  'Plasma-cells' = c('JCHAIN', 'IGHG1', 'MZB1'), 
+  'LC-cells' = c('CD207', 'CD1A'), #Primarily located in epidermis (CD1A aka CD1)  
+  'Dendritic-cells' = c('CD1C', 'CD1B', 'ITGAX'), #immature DC primarily located in superior dermis (ITGAX aka CD11C)
+  'Dendritic-cells2' = c('CD83', 'LAMP3', 'THBD'), #mature DC: LAMP3 aka CD208, THBD aka CD141
+  'Dendritic-cells3' = c('CLEC9A'), #CLEC9A aka DNGR1, a Dendritic Cell-Specific Sensor 
+  'Schwann' = c('SOX10', 'SOX2'), 
+  'PC-vSMC' = c('ACTA2', 'MCAM'), 
+  'Epithelial_Mesenchymal' = c('EPCAM', 'PDGFRB')
+)
+plot_list <- FeaturePlot(
+  data.int,
+  features=unlist(canonical_markers),
+  combine=FALSE
+)
+
+
+# apply theme to each feature plot
+for(i in 1:length(plot_list)){
+  plot_list[[i]] <- plot_list[[i]] + NoAxes() + cc + small.leg
+}
+
+cowplot::plot_grid(plotlist = plot_list[1:3], ncol = 3) + draw_figure_label(label = "Keratinocytes", size = 8, fontface = "bold", position = "top.right")
+cowplot::plot_grid(plotlist = plot_list[4:6], ncol = 3) + draw_figure_label(label = "Fibroblasts", size = 8, fontface = "bold", position = "top.right")
+cowplot::plot_grid(plotlist = plot_list[7:9], ncol = 3) + draw_figure_label(label = "Melanocytes", size = 8, fontface = "bold", position = "top.right")
+cowplot::plot_grid(plotlist = plot_list[10:12], ncol = 3) + draw_figure_label(label = "Endothelial cells", size = 8, fontface = "bold", position = "top.right")
+cowplot::plot_grid(plotlist = plot_list[13:15], ncol = 3) + draw_figure_label(label = "Myeloid Cells", size = 8, fontface = "bold", position = "top.right")
+cowplot::plot_grid(plotlist = plot_list[16:18], ncol = 3) + draw_figure_label(label = "Monocytes & Macrophages", size = 8, fontface = "bold", position = "top.right")
+cowplot::plot_grid(plotlist = plot_list[19:21], ncol = 3) + draw_figure_label(label = "Macrophages", size = 8, fontface = "bold", position = "top.right")
+cowplot::plot_grid(plotlist = plot_list[22:24], ncol = 3) + draw_figure_label(label = "T/Th cells", size = 8, fontface = "bold", position = "top.right")
+cowplot::plot_grid(plotlist = plot_list[25:27], ncol = 3) + draw_figure_label(label = "T/NK cells", size = 8, fontface = "bold", position = "top.right")
+cowplot::plot_grid(plotlist = plot_list[28:30], ncol = 3) + draw_figure_label(label = "B cells", size = 8, fontface = "bold", position = "top.right")
+cowplot::plot_grid(plotlist = plot_list[31:33], ncol = 3) + draw_figure_label(label = "Plasma cells", size = 8, fontface = "bold", position = "top.right")
+cowplot::plot_grid(plotlist = plot_list[34:35], ncol = 3) + draw_figure_label(label = "Langerhans cells", size = 8, fontface = "bold", position = "top.right")
+cowplot::plot_grid(plotlist = plot_list[36:38], ncol = 3) + draw_figure_label(label = "Dermal Dendritic cells", size = 8, fontface = "bold", position = "top.right")
+cowplot::plot_grid(plotlist = plot_list[39:41], ncol = 3) + draw_figure_label(label = "Mature Dendritic cells", size = 8, fontface = "bold", position = "top.right")
+cowplot::plot_grid(plotlist = plot_list[42], ncol = 3) + draw_figure_label(label = "Specific Dendritic cells", size = 8, fontface = "bold", position = "top.right")
+cowplot::plot_grid(plotlist = plot_list[43:44], ncol = 3) + draw_figure_label(label = "Schwann cells", size = 8, fontface = "bold", position = "top.right")
+cowplot::plot_grid(plotlist = plot_list[45:46], ncol = 3) + draw_figure_label(label = "PC-vSMC cells", size = 8, fontface = "bold", position = "top.right")
+cowplot::plot_grid(plotlist = plot_list[47:48], ncol = 3) + draw_figure_label(label = "Epithelial / Mesenchymal cells", size = 8, fontface = "bold", position = "top.right")
+```
+
+```{r eval=FALSE}
+saveRDS(data.int, file = "Seurat_STseq_integrated.rds")
+```
+
+
+# Sessioninfo
+```{r}
+immsen3 <- as.data.frame(table(hsskin.ST$age, hsskin.ST$SCT_snn_res.0.5))
+
+cells <- as.data.frame(immsen3 %>%
+                           group_by(Var1) %>%
+                           mutate(Freq = Freq / sum(Freq)))
+# cells <- cells[cells$Var2 != 'none',]
+# cells <- cells[cells$Var2 != 'CD45+',]
+
+cells <- cells %>%
+  group_by(Var1) %>%
+  mutate(Percentage = round(Freq * 100, 1))  # Convert proportion to percentage
+
+library(ggplot2)
+stacked_barplot <- ggplot(cells, aes(x = Var1, y = Freq, fill = Var2)) +
+  geom_bar(stat = "identity", position = "stack") +
+  theme_minimal() +
+  labs(
+    title = "Proportion of  Cell Types in Young vs. Old",
+    x = "Age Group",
+    y = "Proportion",
+    fill = "Cell Types"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 12)
+  )
+
+# Display the plot
+print(stacked_barplot)
+```
+
+##Convert to h5ad
+```{r}
+library(Seurat)
+library(SeuratDisk)
+library(hdf5r)
+
+if(do.st){
+  # then the ST data
+  outdir = "data"
+  savefile = file.path(outdir,"Seurat_STseq_integrated.rds")
+  st.data = readRDS(file = savefile)
+  
+  st.data <- hsskin.ST
+  # OBS! All factor columns are converted to numbers in scanpy, fix!
+  cl = sapply(st.data@meta.data, is.factor)
+  
+  for (col in names(cl)[cl]){
+    print(col)
+    st.data[[col]] = as.character(st.data[[col]][,1])
+  }
+  # to keep the reductions even if removing SCT assay, change the assay.used
+  st.data@reductions$umap@assay.used = "Xenium"
+  st.data@reductions$pca@assay.used = "Xenium"
+  
+  st.data@active.assay = "Xenium"
+  st.data@assays$Xenium$data = st.data@assays$Xenium$counts
+  st.data = DietSeurat(st.data, assays = "Xenium", dimreducs = c("pca", "umap", "harmony"))
+  
+  
+  
+  SaveH5Seurat(st.data, filename = file.path(outdir,"Seurat_STseq_integrated.h5Seurat"))
+  Convert(file.path(outdir,"Seurat_STseq_integrated.h5Seurat"), dest = "h5ad")
+  
+  file.remove(file.path(outdir,"Seurat_STseq_integrated.h5Seurat"))
+}
+
+install.packages("scCustomize")
+library(scCustomize)
+library(reticulate)
+reticulate::install_miniconda() # miniconda already installed
+reticulate::use_miniconda(
+    condaenv = "~/.local/share/r-miniconda", 
+    required = TRUE
+)
+reticulate::py_config()
+
+system("ls -a ~ | grep .condarc")
+system('echo "ssl_verify: false" >> ~/.condarc')
+system('cat ~/.condarc')
+
+# 1. Define the base path to your miniconda environment
+conda_path <- "/home/ext_han_yeaeun_mayo_edu/.local/share/r-miniconda"
+
+system(paste("rm -rf", conda_path))
+
+pip_uninstall_command <- paste0(
+    "source ", conda_path, "/bin/activate && ",
+    conda_path, "/bin/python -m pip uninstall numpy -y"
+)
+
+# 2. Construct the full command to activate the environment and run pip install
+# We use the '--trusted-host pypi.org' flag to bypass the SSL error.
+pip_command <- paste0(
+    "source ", conda_path, "/bin/activate && ",
+    conda_path, "/bin/python -m pip install ",
+    #"--upgrade --no-user --ignore-installed anndata ",
+    "--upgrade --no-user --ignore-installed numpy==1.26.4 ", # Targeting a specific stable version
+    # CRITICAL: Trust both domains
+    "--trusted-host pypi.org ",
+    "--trusted-host files.pythonhosted.org"
+)
+
+# 3. Execute the command in the shell
+system(pip_command)
+
+reticulate::py_install(
+    packages = c("anndata"), 
+    envname = "~/.local/share/r-miniconda", 
+    method = "conda",
+    pip = TRUE,
+    ignore_installed = TRUE
+)
+
+reticulate::py_module_available("anndata")
+reticulate::import("anndata")
+
+reticulate::use_condaenv("xenium_skin_env", required = TRUE)
+reticulate::py_install("anndata", method = "conda")
+
+as.anndata(x = st.data, file_path = "data", file_name = "hsskin.h5ad")
+
+devtools::install_github("zhanghao-njmu/SCP")
+library(SCP)
+
+SCP::PrepareEnv()
+
+dat <- SCP::srt_to_adata(st.data)
+
+```
+
+
+```{r}
+sessionInfo()
+```

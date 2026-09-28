@@ -1,0 +1,1015 @@
+---
+title: "2_Xenium_SnCAnalysis"
+output: html_document
+---
+
+```{r}
+##########################################################
+# Xenium: SnC + cell type annotation + plots
+# (parallel to your 4i / CODEX workflow)
+##########################################################
+
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(dplyr)
+  library(ggplot2)
+  library(scales)
+  library(ggpubr)
+  library(pheatmap)
+})
+
+# ---- set working dir (edit if needed) ----
+load("/home/ext_han_yeaeun_mayo_edu/skin_mapping/data/260311.RData")
+save.image("/home/ext_han_yeaeun_mayo_edu/skin_mapping/data/260311.RData")
+
+
+
+# ---- load split violin geom (your plotfunctions.R) ----
+source("../shared/plotfunctions.R")  # must define geom_split_violin()
+
+# ---- your Xenium Seurat object ----
+# assume it exists in the environment as: hsskin.ST
+# (if you need to load it, add: hsskin.ST <- readRDS("path/to/xenium.rds"))
+
+# =========================
+# 1) Choose assay/layer conventions
+# =========================
+# positivity calls: use Xenium counts (true detection)
+assay_pos  <- if ("Xenium" %in% Assays(hsskin.ST)) "Xenium" else DefaultAssay(hsskin.ST)
+layer_pos  <- "counts"
+
+# plotting expression: use SCT normalized (smooth distribution)
+assay_plot <- if ("SCT" %in% Assays(hsskin.ST)) "SCT" else DefaultAssay(hsskin.ST)
+layer_plot <- "data"
+
+# =========================
+# 2) Helper: marker positivity (counts > 0) with graceful fallback
+# =========================
+get_pos <- function(obj, feature, assay = "Xenium", layer = "counts") {
+  if (!assay %in% Assays(obj)) {
+    stop(paste("Assay not found:", assay))
+  }
+  if (!feature %in% rownames(obj[[assay]])) {
+    return(setNames(rep(FALSE, ncol(obj)), colnames(obj)))
+  }
+  m <- LayerData(obj, assay = assay, layer = layer)[feature, ]
+  setNames(as.numeric(m) > 0, names(m))
+}
+
+# =========================
+# 3) Marker mapping (Xenium gene symbols)
+# =========================
+sasp_genes <- c(
+"CCL11","CCL13","CCL14","CCL15","CCL16","CCL19","CCL2","CCL20","CCL21",
+"CCL26","CCL28","CCL3","CCL3L1","CCL4","CCL5","CCL7","CCL8",
+"CXCL1","CXCL10","CXCL11","CXCL12","CXCL13","CXCL14","CXCL16","CXCL2",
+"CXCL3","CXCL5","CXCL6","CXCL9",
+"IL12B","IL13","IL15","IL18","IL1A","IL1B","IL2","IL23A","IL4","IL5","IL6",
+"MMP12","MMP9","MMP3",
+"VEGFA","TNF","TGFB1","CSF1","EGF","FGF2","IFNB1","CMKLR1"
+)
+
+# keep only genes present in Xenium panel
+sasp_genes_present <- intersect(sasp_genes, rownames(hsskin.ST))
+
+cat("SASP genes detected in panel:", length(sasp_genes_present), "\n")
+
+# binary SASP positivity matrix
+sasp_matrix <- GetAssayData(
+  object = hsskin.ST, 
+  assay = "Xenium", 
+  layer = "counts"  # In Seurat v4 this is slot = "counts"
+)[sasp_genes_present, ]
+
+sasp_binary <- sasp_matrix > 0
+
+# number of SASP genes expressed per cell
+hsskin.ST$sasp_num <- colSums(sasp_binary)
+
+
+# Senescence markers
+p21   <- get_pos(hsskin.ST, "CDKN1A", assay_pos, layer_pos)  # p21
+p16   <- get_pos(hsskin.ST, "CDKN2A", assay_pos, layer_pos)  # p16
+PCNA  <- get_pos(hsskin.ST, "PCNA",   assay_pos, layer_pos)
+MKI67  <- get_pos(hsskin.ST, "MKI67",   assay_pos, layer_pos)
+IP10  <- get_pos(hsskin.ST, "CXCL10", assay_pos, layer_pos)  # IP-10 gene
+CXCR3 <- get_pos(hsskin.ST, "CXCR3",  assay_pos, layer_pos)
+
+# Sub-senescence / nuclear markers (for plotting)
+BCL2  <- get_pos(hsskin.ST, "BCL2",   assay_pos, layer_pos)
+HMGB1 <- get_pos(hsskin.ST, "HMGB1",  assay_pos, layer_pos)
+LMNB1 <- get_pos(hsskin.ST, "LMNB1",  assay_pos, layer_pos)  # LaminB1 gene
+
+# Skin markers
+MelanA    <- get_pos(hsskin.ST, "MLANA", assay_pos, layer_pos) # MelanA
+Vimentin  <- get_pos(hsskin.ST, "VIM",   assay_pos, layer_pos) # Vimentin
+Keratin5  <- get_pos(hsskin.ST, "KRT5",  assay_pos, layer_pos) # Keratin 5
+Keratin10 <- get_pos(hsskin.ST, "KRT10", assay_pos, layer_pos) # Keratin 10
+Filaggrin <- get_pos(hsskin.ST, "FLG",   assay_pos, layer_pos) # Filaggrin
+SMA       <- get_pos(hsskin.ST, "ACTA2", assay_pos, layer_pos) # SMA / ACTA2
+
+# =========================
+# 4) Annotate SnC + skin cell types (same conventions as 4i/CODEX)
+# =========================
+hsskin.ST$snc <- ifelse(((p21 | p16) & !(PCNA | MKI67) & hsskin.ST$sasp_num >= 5), "SnC+", "SnC-")
+#hsskin.ST$snc2 <- ifelse(((p21 | p16) & !(PCNA | MKI67) & (BCL2) & hsskin.ST$sasp_num >= 5), "SnC+", "SnC-")
+hsskin.ST$snc <- factor(hsskin.ST$snc, levels = c("SnC-", "SnC+"))
+#hsskin.ST$snc2 <- factor(hsskin.ST$snc2, levels = c("SnC-", "SnC+"))
+
+hsskin.ST$majorskincell <- dplyr::case_when(
+  MelanA ~ "Melanocyte",
+  SMA ~ "Smooth Muscle",
+  Vimentin ~ "Fibroblast",
+  (Keratin5 | Keratin10 | Filaggrin) ~ "Keratinocyte",
+  TRUE ~ "none"
+)
+
+hsskin.ST$minorskincell <- dplyr::case_when(
+  MelanA ~ "Melanocyte",
+  SMA ~ "Smooth Muscle",
+  Vimentin ~ "Fibroblast",
+  Keratin5 ~ "Basal Keratinocyte",
+  Keratin10 ~ "Suprabasal Keratinocyte",
+  Filaggrin ~ "Corneocyte",
+  TRUE ~ "none"
+)
+
+# Inversed anatomical order (deep -> superficial), with "none" first
+hsskin.ST$majorskincell <- factor(
+  hsskin.ST$majorskincell,
+  levels = c("none", "Smooth Muscle", "Fibroblast", "Melanocyte", "Keratinocyte")
+)
+hsskin.ST$minorskincell <- factor(
+  hsskin.ST$minorskincell,
+  levels = c("none", "Smooth Muscle", "Fibroblast", "Melanocyte",
+             "Basal Keratinocyte", "Suprabasal Keratinocyte", "Corneocyte")
+)
+
+# Optional combined labels (if you later want them)
+if ("age" %in% colnames(hsskin.ST@meta.data)) {
+  hsskin.ST$age_major <- paste(hsskin.ST$age, hsskin.ST$majorskincell, sep = " ")
+  hsskin.ST$age_minor <- paste(hsskin.ST$age, hsskin.ST$minorskincell, sep = " ")
+}
+```
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+blue_col <- "#296d9e"
+
+# 1) Derive age from sample suffix (-Y / -O)
+hsskin.ST$age <- dplyr::case_when(
+  grepl("-Y$", hsskin.ST$sample) ~ "Young",
+  grepl("-O$", hsskin.ST$sample) ~ "Old",
+  TRUE ~ NA_character_
+)
+hsskin.ST$age <- factor(hsskin.ST$age, levels = c("Young", "Old"))
+
+# 2) Sample-level SnC proportion (each dot = sample)
+df_xen_samples <- hsskin.ST@meta.data %>%
+  filter(!is.na(sample) & !is.na(age)) %>%
+  group_by(age, sample) %>%
+  summarise(
+    snc_prop = mean(snc2 == "SnC+", na.rm = TRUE),
+    n_cells = n(),
+    .groups = "drop"
+  )
+
+# 3) Nature-style bar plot: mean ± SEM + sample dots
+ymax <- max(df_xen_samples$snc_prop, na.rm = TRUE) * 1.15
+
+p_age <- ggplot(df_xen_samples, aes(x = age, y = snc_prop)) +
+  stat_summary(fun = mean, geom = "bar", width = 0.6,
+               fill = blue_col, color = "black") +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.15,
+               linewidth = 0.8, color = "black") +
+  geom_point(position = position_jitter(width = 0.07),
+             size = 3, color = "black") +
+  scale_y_continuous(
+    limits = c(0, ymax),
+    breaks = pretty(c(0, ymax), n = 4),
+    labels = percent_format(accuracy = 0.1),
+    expand = c(0, 0)
+  ) +
+  labs(x = NULL, y = NULL) +
+  theme_classic(base_size = 18)
+
+print(p_age)
+
+# optional save
+ggsave("results/260225/xenium_snc_age.pdf", plot = p_age, width = 3.6, height = 4.2, dpi = 500)
+
+# sanity check table
+df_xen_samples %>% arrange(age, sample)
+```
+
+
+
+
+```{r}
+# =========================
+# 6) Split violins: BCL2 / HMGB1 / LMNB1 by SnC (use SCT "data")
+# =========================
+plot_split_violin_marker <- function(obj,
+                                     feature,
+                                     group_col = "snc",
+                                     assay = "SCT",
+                                     layer = "data",
+                                     cols = c("SnC-" = "#296d9e", "SnC+" = "#cc0b01")) {
+
+  df <- FetchData(obj, vars = c(feature, group_col), assay = assay, layer = layer)
+  colnames(df) <- c("value", "group")
+  df <- df %>%
+    filter(!is.na(group)) %>%
+    mutate(group = factor(group, levels = c("SnC-", "SnC+")))
+
+  df$feature_name <- feature
+
+  ggplot(df, aes(x = feature_name, y = value, fill = group)) +
+    geom_split_violin(scale = "width", trim = TRUE, alpha = 0.9) +
+    geom_boxplot(width = 0.15, outliers = FALSE, fill = "white") +
+    stat_compare_means(aes(group = group), method = "wilcox.test",
+                       label = "p.signif", size = 5) +
+    scale_fill_manual(values = cols) +
+    theme_classic(base_size = 18) +
+    theme(
+      legend.position = "none",
+      axis.title.x = element_blank(),
+      axis.text.x = element_text(size = 14, face = "bold"),
+      axis.title.y = element_text(size = 14)
+    ) +
+    labs(y = paste0("Expression (", assay, " ", layer, ")"))
+}
+
+features <- c("BCL2", "HMGB1", "LMNB1")
+
+# Only plot features that exist in the plotting assay
+features_present <- features[features %in% rownames(hsskin.ST[[assay_plot]])]
+if (length(features_present) > 0) {
+  p_list <- lapply(features_present, function(f) plot_split_violin_marker(
+    obj = hsskin.ST,
+    feature = f,
+    group_col = "snc",
+    assay = assay_plot,
+    layer = layer_plot
+  ))
+
+  final_plot <- Reduce(`+`, p_list)
+  print(final_plot)
+} else {
+  warning("None of BCL2/HMGB1/LMNB1 found in plotting assay. Check assay_plot/feature names.")
+}
+
+# =========================
+# 7) Save object (optional)
+# =========================
+# saveRDS(hsskin.ST, file = "data/xenium/hsskin_ST_annotated.rds")
+
+```
+
+```{r}
+##########################################################
+# SASP DEG analysis between Young vs Old SnC cells
+##########################################################
+hsskin.ST2 <- UpdateSeuratObject(hsskin.ST)
+DefaultAssay(hsskin.ST2) <- "Xenium"
+
+# Ensure Xenium "data" exists (log-normalized) for FindMarkers(slot="data")
+hsskin.ST2 <- NormalizeData(hsskin.ST2, assay = "Xenium",
+                            normalization.method = "LogNormalize",
+                            scale.factor = 1e4, verbose = FALSE)
+
+# make sure age exists + snc2 exists
+stopifnot("age" %in% colnames(hsskin.ST2@meta.data))
+stopifnot("snc2" %in% colnames(hsskin.ST2@meta.data))
+
+# SASP genes present in panel
+sasp_genes_present <- intersect(sasp_genes_present, rownames(hsskin.ST2[["Xenium"]]))
+
+run_within_age_deg <- function(obj, age_value, snc_col = "snc2", genes = NULL) {
+
+  if (is.null(genes)) {
+    genes <- rownames(obj[["Xenium"]])  # fallback: all genes in Xenium assay
+  }
+
+  md <- obj@meta.data
+  keep_cells <- rownames(md)[md$age == age_value & !is.na(md[[snc_col]])]
+
+  x <- subset(obj, cells = keep_cells)
+  Idents(x) <- factor(x@meta.data[[snc_col]], levels = c("SnC-", "SnC+"))
+
+  print(table(Idents(x)))
+
+  FindMarkers(
+    x,
+    ident.1 = "SnC+",
+    ident.2 = "SnC-",
+    features = genes,
+    assay = "Xenium",
+    slot = "data",
+    test.use = "wilcox",
+    logfc.threshold = 0,
+    min.pct = 0.05
+  ) %>%
+    tibble::rownames_to_column("gene") %>%
+    arrange(p_val_adj, p_val)
+}
+
+deg_young <- run_within_age_deg(hsskin.ST2, "Young")
+deg_old   <- run_within_age_deg(hsskin.ST2, "Old")
+
+topN <- 20
+
+top_young <- deg_young %>%
+  arrange(p_val_adj, desc(abs(avg_log2FC))) %>%
+  slice_head(n = topN) %>%
+  pull(gene)
+
+top_old <- deg_old %>%
+  arrange(p_val_adj, desc(abs(avg_log2FC))) %>%
+  slice_head(n = topN) %>%
+  pull(gene)
+
+young_obj <- subset(hsskin.ST2, subset = age == "Young")
+Idents(young_obj) <- young_obj$snc2
+
+# Example usage (Young: SnC+ vs SnC-)
+Idents(young_obj) <- young_obj$snc2  # or snc
+genes_to_plot <- top_young        # or top_young
+
+p_young <- DotPlot(
+  young_obj,
+  features = genes_to_plot,
+  assay = "Xenium",
+  dot.scale = 6,
+  scale = FALSE
+) +
+  scale_color_gradientn(
+    colours = c("lightgray","#9ecae1","#3182bd","#08519c")
+  ) +
+  theme(
+    axis.title = element_blank(),
+    axis.text.x = element_text(angle = 90),
+    axis.text.y = element_text(size = 9)
+  )
+
+p_young <- p_young +
+  theme(
+    legend.position = "right",
+    legend.justification = c(0, 0.9),
+    legend.key.height = unit(0.3, "cm"),
+    legend.box.spacing = unit(0.2, "cm"),
+    legend.margin = margin(0, 0, 0, 0),
+    plot.margin = margin(5.5, 30, 5.5, 5.5)   # add right margin
+  )
+
+ggsave(
+  "young_snc_dotplot.png",
+  p_young,
+  width = 7.8,   # slightly wider
+  height = 2.3,
+  dpi = 300,
+  bg = "white"
+)
+
+old_obj <- subset(hsskin.ST2, subset = age == "Old")
+Idents(old_obj) <- old_obj$snc2
+
+# Example usage (old: SnC+ vs SnC-)
+Idents(old_obj) <- old_obj$snc2  # or snc
+genes_to_plot <- top_old        #
+
+p_old <- DotPlot(
+  old_obj,
+  features = genes_to_plot,
+  assay = "Xenium",
+  dot.scale = 6,
+  scale = TRUE
+) +
+  scale_color_gradientn(
+    colours = c("lightgray","#9ecae1","#3182bd","#08519c")
+  ) +
+  theme(
+    axis.title = element_blank(),
+    axis.text.x = element_text(angle = 90),
+    axis.text.y = element_text(size = 9)
+  )
+
+p_old <- p_old +
+  theme(
+    legend.position = "right",
+    legend.justification = c(0, 0.9),
+    legend.key.height = unit(0.3, "cm"),
+    legend.box.spacing = unit(0.2, "cm"),
+    legend.margin = margin(0, 0, 0, 0),
+    plot.margin = margin(5.5, 30, 5.5, 5.5)   # add right margin
+  )
+
+ggsave(
+  "old_snc_dotplot.png",
+  p_old,
+  width = 7.8,   # slightly wider
+  height = 2.4,
+  dpi = 300,
+  bg = "white"
+)
+```
+
+```{r}
+# # Re-run DE using only SASP genes
+# deg_young <- run_within_age_deg(hsskin.ST2, "Young", genes = sasp_genes_present)
+# deg_old   <- run_within_age_deg(hsskin.ST2, "Old",   genes = sasp_genes_present)
+# 
+# # -----------------------------
+# # 2) Pick a top 25 SASP gene set across both ages
+# # -----------------------------
+# topN <- 25
+# 
+# # Add age label
+# deg_young2 <- deg_young %>% mutate(age_group = "Young")
+# deg_old2   <- deg_old   %>% mutate(age_group = "Old")
+# 
+# deg_both <- bind_rows(deg_young2, deg_old2)
+# 
+# # Rank genes by strongest evidence across either age:
+# # - smallest adjusted p
+# # - then largest absolute logFC
+# top_sasp_genes <- deg_both %>%
+#   mutate(abs_log2FC = abs(avg_log2FC)) %>%
+#   group_by(gene) %>%
+#   summarise(
+#     best_padj = suppressWarnings(min(p_val_adj, na.rm = TRUE)),
+#     best_p    = suppressWarnings(min(p_val, na.rm = TRUE)),
+#     best_absFC = max(abs_log2FC, na.rm = TRUE),
+#     .groups = "drop"
+#   ) %>%
+#   mutate(
+#     best_padj = ifelse(is.infinite(best_padj) | is.na(best_padj), 1, best_padj),
+#     best_p    = ifelse(is.infinite(best_p)    | is.na(best_p),    1, best_p),
+#     best_absFC = ifelse(is.infinite(best_absFC) | is.na(best_absFC), 0, best_absFC)
+#   ) %>%
+#   arrange(best_padj, best_p, desc(best_absFC)) %>%
+#   slice_head(n = topN) %>%
+#   pull(gene)
+# 
+# top_sasp_genes
+
+
+# Balanced version: take top genes from each age, then union, then keep top 25
+top_each_age <- 15
+
+top_young <- deg_young %>%
+  mutate(abs_log2FC = abs(avg_log2FC)) %>%
+  arrange(p_val_adj, p_val, desc(abs_log2FC)) %>%
+  slice_head(n = top_each_age) %>%
+  pull(gene)
+
+top_old <- deg_old %>%
+  mutate(abs_log2FC = abs(avg_log2FC)) %>%
+  arrange(p_val_adj, p_val, desc(abs_log2FC)) %>%
+  slice_head(n = top_each_age) %>%
+  pull(gene)
+
+candidate_genes <- union(top_young, top_old)
+
+top_sasp_genes <- deg_both %>%
+  filter(gene %in% candidate_genes) %>%
+  mutate(abs_log2FC = abs(avg_log2FC)) %>%
+  group_by(gene) %>%
+  summarise(
+    best_padj = suppressWarnings(min(p_val_adj, na.rm = TRUE)),
+    best_p    = suppressWarnings(min(p_val, na.rm = TRUE)),
+    best_absFC = max(abs_log2FC, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    best_padj = ifelse(is.infinite(best_padj) | is.na(best_padj), 1, best_padj),
+    best_p    = ifelse(is.infinite(best_p)    | is.na(best_p),    1, best_p),
+    best_absFC = ifelse(is.infinite(best_absFC) | is.na(best_absFC), 0, best_absFC)
+  ) %>%
+  arrange(best_padj, best_p, desc(best_absFC)) %>%
+  slice_head(n = topN) %>%
+  pull(gene)
+
+
+# -----------------------------
+# 3) Create 4-group identity
+# -----------------------------
+hsskin.ST2$age_snc4 <- paste(hsskin.ST2$age, hsskin.ST2$snc2, sep = "_")
+
+hsskin.ST2$age_snc4 <- factor(
+  hsskin.ST2$age_snc4,
+  levels = c("Young_SnC-", "Young_SnC+", "Old_SnC-", "Old_SnC+")
+)
+
+Idents(hsskin.ST2) <- "age_snc4"
+
+# Optional: drop cells with NA group
+cells_keep <- colnames(hsskin.ST2)[!is.na(hsskin.ST2$age_snc4)]
+plot_obj <- subset(hsskin.ST2, cells = cells_keep)
+
+table(Idents(plot_obj))
+
+
+# -----------------------------
+# 4) DotPlot with 4 groups
+# -----------------------------
+p4 <- DotPlot(
+  plot_obj,
+  features = top_sasp_genes,
+  assay = "Xenium",
+  group.by = "age_snc4",
+  scale = TRUE,      # now okay because there are 4 groups
+  dot.scale = 5
+) +
+  scale_color_gradientn(
+    colours = c("lightgrey", "#9ecae1", "#3182bd", "#08519c")
+  ) +
+  theme(
+    axis.title = element_blank(),
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+    axis.text.y = element_text(size = 9),
+    legend.title = element_text(size = 9),
+    legend.text = element_text(size = 8)
+  )
+
+p4
+```
+
+
+```{r}
+# -----------------------------
+# 1) Pick top SASP genes from SnC+ vs SnC- comparisons
+#    ignoring age split
+# -----------------------------
+topN <- 20
+
+top_sasp_genes <- deg_both %>%
+  mutate(abs_log2FC = abs(avg_log2FC)) %>%
+  group_by(gene) %>%
+  summarise(
+    best_padj  = suppressWarnings(min(p_val_adj, na.rm = TRUE)),
+    best_p     = suppressWarnings(min(p_val, na.rm = TRUE)),
+    best_absFC = max(abs_log2FC, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    best_padj  = ifelse(is.infinite(best_padj)  | is.na(best_padj), 1, best_padj),
+    best_p     = ifelse(is.infinite(best_p)     | is.na(best_p),    1, best_p),
+    best_absFC = ifelse(is.infinite(best_absFC) | is.na(best_absFC), 0, best_absFC)
+  ) %>%
+  arrange(best_padj, best_p, desc(best_absFC)) %>%
+  slice_head(n = topN) %>%
+  pull(gene)
+
+# -----------------------------
+# 2) Set identity to SnC only
+# -----------------------------
+hsskin.ST2$snc_only <- factor(
+  hsskin.ST2$snc2,
+  levels = c("SnC-", "SnC+")
+)
+
+Idents(hsskin.ST2) <- "snc_only"
+
+cells_keep <- colnames(hsskin.ST2)[!is.na(hsskin.ST2$snc_only)]
+plot_obj <- subset(hsskin.ST2, cells = cells_keep)
+
+table(Idents(plot_obj))
+
+# -----------------------------
+# 3) DotPlot with 2 groups only
+# -----------------------------
+p_snc <- DotPlot(
+  plot_obj,
+  features = top_sasp_genes,
+  assay = "Xenium",
+  group.by = "snc_only",
+  scale = FALSE,   # better for just 2 groups
+  dot.scale = 5
+) +
+  scale_color_gradientn(
+    colours = c("lightgrey", "#9ecae1", "#3182bd", "#08519c")
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    axis.title = element_blank(),
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8),
+    axis.text.y = element_text(size = 9),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank(),
+    legend.title = element_text(size = 9),
+    legend.text = element_text(size = 8)
+  )
+
+p_snc
+
+ggsave(
+  "xenium_dotplot_snc_only.pdf",
+  p_snc,
+  width = 6,
+  height = 2.5,
+  dpi = 500
+)
+```
+
+
+```{r}
+BiocManager::install("EnhancedVolcano")
+
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)   # Essential for volcano plots so gene labels don't overlap!
+library(patchwork)
+library(EnhancedVolcano)
+
+# Define your columns
+celltype_col <- "cell_type_major"
+snc_col <- "snc"
+age_col <- "age"
+
+# ---------------------------------------------------------
+# 1. Define a universal Volcano Plot function
+# ---------------------------------------------------------
+make_volcano <- function(deg_df, plot_title) {
+  
+  # Set thresholds (0.1 logFC is good for targeted Xenium data)
+  fc_threshold <- 0.1
+  pval_threshold <- 0.05
+  
+  # Create a significance grouping column
+  deg_df$Significance <- "Not Sig"
+  deg_df$Significance[deg_df$p_val_adj < pval_threshold & deg_df$avg_log2FC > fc_threshold] <- "Up"
+  deg_df$Significance[deg_df$p_val_adj < pval_threshold & deg_df$avg_log2FC < -fc_threshold] <- "Down"
+  
+  # Extract gene names from rownames
+  deg_df$gene <- rownames(deg_df)
+  
+  # Filter only the significant genes for text labeling
+  sig_genes <- deg_df %>% filter(Significance != "Not Sig")
+  
+  # Build the plot
+  p <- ggplot(deg_df, aes(x = avg_log2FC, y = -log10(p_val_adj), color = Significance)) +
+    geom_point(alpha = 0.7, size = 1.5) +
+    scale_color_manual(values = c("Up" = "#cc0b01", "Down" = "#08519c", "Not Sig" = "grey80")) +
+    
+    # Add threshold lines
+    geom_vline(xintercept = c(-fc_threshold, fc_threshold), linetype = "dashed", color = "black", alpha = 0.5) +
+    geom_hline(yintercept = -log10(pval_threshold), linetype = "dashed", color = "black", alpha = 0.5) +
+    
+    # Add repelled text labels for significant genes
+    geom_text_repel(
+      data = sig_genes,
+      aes(label = gene),
+      size = 3, 
+      max.overlaps = 20,
+      box.padding = 0.5
+    ) +
+    
+    theme_classic(base_size = 14) +
+    labs(
+      title = plot_title,
+      x = "Log2 Fold Change",
+      y = "-Log10(Adj P-value)"
+    ) +
+    theme(
+      legend.position = "none",
+      plot.title = element_text(face = "bold", hjust = 0.5)
+    )
+  
+  return(p)
+}
+
+# Get a clean list of the major cell types
+major_types <- unique(na.omit(hsskin.ST@meta.data[[celltype_col]]))
+
+# ---------------------------------------------------------
+# 2. Volcano Plots: Old vs Young (within each cell type)
+# ---------------------------------------------------------
+# Create combined identity: e.g., "Fibroblast_Old"
+hsskin.ST$celltype_age <- paste0(hsskin.ST@meta.data[[celltype_col]], "_", hsskin.ST@meta.data[[age_col]])
+Idents(hsskin.ST) <- "celltype_age"
+
+volcanos_age <- list()
+
+for (ct in major_types) {
+  ident_old <- paste0(ct, "_Old")
+  ident_young <- paste0(ct, "_Young")
+  
+  # Safety check: Ensure both groups actually have cells before running math
+  if (ident_old %in% levels(Idents(hsskin.ST)) && ident_young %in% levels(Idents(hsskin.ST))) {
+    
+    # min.pct = 0 and logfc.threshold = 0 forces Seurat to return ALL genes for the volcano shape
+    degs <- FindMarkers(hsskin.ST, ident.1 = ident_old, ident.2 = ident_young, 
+                        min.pct = 0, logfc.threshold = 0)
+    
+    # Generate the plot and store it in the list
+    volcanos_age[[ct]] <- make_volcano(degs, paste0(ct, "\nOld vs Young"))
+  }
+}
+
+# Print all Age volcanos in a grid
+print(wrap_plots(volcanos_age, ncol = 5))
+
+# ---------------------------------------------------------
+# 3. Volcano Plots: SnC+ vs SnC- (within each cell type)
+# ---------------------------------------------------------
+# Create combined identity: e.g., "Fibroblast_SnC+"
+hsskin.ST$celltype_snc <- paste0(hsskin.ST@meta.data[[celltype_col]], "_", hsskin.ST@meta.data[[snc_col]])
+Idents(hsskin.ST) <- "celltype_snc"
+
+volcanos_snc <- list()
+
+for (ct in major_types) {
+  ident_snc_pos <- paste0(ct, "_SnC+")
+  ident_snc_neg <- paste0(ct, "_SnC-")
+  
+  # Safety check: Ensure the cell type actually has SnC+ cells
+  if (ident_snc_pos %in% levels(Idents(hsskin.ST)) && ident_snc_neg %in% levels(Idents(hsskin.ST))) {
+    
+    # Find all markers
+    degs <- FindMarkers(hsskin.ST, ident.1 = ident_snc_pos, ident.2 = ident_snc_neg, 
+                        min.pct = 0, logfc.threshold = 0)
+    
+    # Generate the plot and store it
+    volcanos_snc[[ct]] <- make_volcano(degs, paste0(ct, "\nSnC+ vs SnC-"))
+  }
+}
+
+# Print all SnC volcanos in a grid
+print(wrap_plots(volcanos_snc, ncol = 3))
+```
+
+
+
+```{r}
+# Make sure it's installed if you haven't yet:
+# BiocManager::install("EnhancedVolcano")
+
+library(Seurat)
+library(dplyr)
+library(EnhancedVolcano)
+library(patchwork)
+
+celltype_col <- "cell_type_major"
+snc_col <- "snc"
+age_col <- "age"
+
+# Get a clean list of the major cell types
+major_types <- unique(na.omit(hsskin.ST@meta.data[[celltype_col]]))
+
+# ---------------------------------------------------------
+# 1. Volcano Plots: Old vs Young (within each cell type)
+# ---------------------------------------------------------
+hsskin.ST$celltype_age <- paste0(hsskin.ST@meta.data[[celltype_col]], "_", hsskin.ST@meta.data[[age_col]])
+Idents(hsskin.ST) <- "celltype_age"
+
+volcanos_age <- list()
+
+for (ct in major_types) {
+  ident_old <- paste0(ct, "_Old")
+  ident_young <- paste0(ct, "_Young")
+  
+  if (ident_old %in% levels(Idents(hsskin.ST)) && ident_young %in% levels(Idents(hsskin.ST))) {
+    
+    # Pull all genes for the volcano shape
+    degs <- FindMarkers(hsskin.ST, ident.1 = ident_old, ident.2 = ident_young, 
+                        min.pct = 0, logfc.threshold = 0)
+    
+    # Generate the EnhancedVolcano plot
+    volcanos_age[[ct]] <- EnhancedVolcano(
+      degs,
+      lab = rownames(degs),
+      x = 'avg_log2FC',
+      y = 'p_val_adj',                 # Use adjusted p-value!
+      title = paste0(ct, "\nOld vs Young"),
+      subtitle = NULL,                 # Hide subtitle to save grid space
+      caption = NULL,                  # Hide caption to save grid space
+      pCutoff = 0.05,
+      FCcutoff = 0.1,                  # 0.1 threshold for Xenium
+      pointSize = 2.0,
+      labSize = 4.0,
+      legendPosition = 'none',         # Hide legend to save grid space
+      drawConnectors = TRUE,
+      widthConnectors = 0.5,
+      axisLabSize = 10,
+      titleLabSize = 12
+    )
+  }
+}
+
+# Print all Age volcanos in a grid
+print(wrap_plots(volcanos_age, ncol = 5))
+
+# ---------------------------------------------------------
+# 2. Volcano Plots: SnC+ vs SnC- (within each cell type)
+# ---------------------------------------------------------
+hsskin.ST$celltype_snc <- paste0(hsskin.ST@meta.data[[celltype_col]], "_", hsskin.ST@meta.data[[snc_col]])
+Idents(hsskin.ST) <- "celltype_snc"
+
+volcanos_snc <- list()
+
+for (ct in major_types) {
+  ident_snc_pos <- paste0(ct, "_SnC+")
+  ident_snc_neg <- paste0(ct, "_SnC-")
+  
+  # Count the actual number of cells in each group
+  n_pos <- sum(Idents(hsskin.ST) == ident_snc_pos)
+  n_neg <- sum(Idents(hsskin.ST) == ident_snc_neg)
+  
+  # Only run if BOTH groups have at least 3 cells
+  if (n_pos >= 3 && n_neg >= 3) {
+    
+    degs <- FindMarkers(hsskin.ST, ident.1 = ident_snc_pos, ident.2 = ident_snc_neg, 
+                        min.pct = 0, logfc.threshold = 0)
+    
+    volcanos_snc[[ct]] <- EnhancedVolcano(
+      degs,
+      lab = rownames(degs),
+      x = 'avg_log2FC',
+      y = 'p_val_adj',
+      title = paste0(ct, "\nSnC+ vs SnC-"),
+      subtitle = NULL,
+      caption = NULL,
+      pCutoff = 0.05,
+      FCcutoff = 0.1,
+      pointSize = 2.0,
+      labSize = 4.0,
+      legendPosition = 'none',
+      drawConnectors = TRUE,
+      widthConnectors = 0.5,
+      axisLabSize = 10,
+      titleLabSize = 12
+    )
+  } else {
+    cat("Skipping", ct, "(SnC) - not enough cells (SnC+:", n_pos, ", SnC-:", n_neg, ")\n")
+  }
+}
+
+print(wrap_plots(volcanos_snc, ncol = 5))
+```
+
+
+
+```{r}
+# 1. Set the active identity to the SnC status
+Idents(hsskin.ST) <- "snc"
+
+# 2. Perform DE analysis between all SnC+ and SnC- cells
+# We use the entire object, which ignores cell type labels
+degs_all <- FindMarkers(
+  hsskin.ST, 
+  ident.1 = "SnC+", 
+  ident.2 = "SnC-", 
+  min.pct = 0, 
+  logfc.threshold = 0
+)
+
+# 3. Generate the Volcano Plot
+p_volcano_all <- EnhancedVolcano(
+  degs_all,
+  lab = rownames(degs_all),
+  x = 'avg_log2FC',
+  y = 'p_val_adj',
+  title = "Global SnC+ vs SnC-",
+  subtitle = "All cell types combined",
+  pCutoff = 0.05,
+  FCcutoff = 0.1,
+  pointSize = 2.0,
+  labSize = 4.0,
+  legendPosition = 'right',
+  drawConnectors = TRUE,
+  axisLabSize = 10,
+  col=c('grey', '#000080', 'darkgreen', '#a00000'),
+  titleLabSize = 12
+)
+
+print(p_volcano_all)
+
+ggsave("results/260506//xenium_total_volcano.pdf",
+       p_volcano_all, width = 6, height = 4, dpi = 300)
+```
+
+
+
+
+
+
+```{r}
+#Volcano plots of old vs young
+library(Seurat)
+library(dplyr)
+library(EnhancedVolcano)
+library(patchwork)
+
+# ---------------------------------------------------------
+# Define Gating Targets to Mask (Circularity Prevention)
+# ---------------------------------------------------------
+# Put any gene here that was directly used inside your rule logic
+gating_genes <- c(
+  "CDKN2A", "CDKN1A", "PCNA", "MKI67",
+  "CCL2",   "CCL3",   "CCL3L1", "CCL4",   "CCL5",   "CCL7",   "CCL8",   
+  "CCL11",  "CCL13",  "CCL14",  "CCL15",  "CCL16",  "CCL19",  "CCL20",  
+  "CCL21",  "CCL26",  "CCL28", "CXCL1",  "CXCL2",  "CXCL3",  "CXCL5",  
+  "CXCL6",  "CXCL9",  "CXCL10", "CXCL11", "CXCL12", "CXCL13", "CXCL14", 
+  "CXCL16", "IL1A", "IL1B", "IL2",  "IL4",  "IL5",  "IL6", "IL8", "IL12B",  
+  "IL13", "IL15", "IL18", "IL23A", "TNF", "IFNB1", "CMKLR1", "MMP1", "MMP3",   
+  "MMP9", "MMP12", "VEGFA",  "TGFB1", "CSF1", "EGF", "FGF2")
+
+celltype_col <- "cell_type_major"
+snc_col      <- "snc"
+age_col      <- "age"
+
+major_types <- unique(na.omit(hsskin.ST@meta.data[[celltype_col]]))
+
+# =========================================================================
+# 1. Volcano Plots: Old vs Young (KEEP ALL GENES - Pure Biology Variable)
+# =========================================================================
+hsskin.ST$celltype_age <- paste0(hsskin.ST@meta.data[[celltype_col]], "_", hsskin.ST@meta.data[[age_col]])
+Idents(hsskin.ST) <- "celltype_age"
+
+volcanos_age <- list()
+for (ct in major_types) {
+  ident_old <- paste0(ct, "_Old")
+  ident_young <- paste0(ct, "_Young")
+  
+  if (ident_old %in% levels(Idents(hsskin.ST)) && ident_young %in% levels(Idents(hsskin.ST))) {
+    degs <- FindMarkers(hsskin.ST, ident.1 = ident_old, ident.2 = ident_young, 
+                        min.pct = 0, logfc.threshold = 0)
+    
+    volcanos_age[[ct]] <- EnhancedVolcano(
+      degs, lab = rownames(degs), x = 'avg_log2FC', y = 'p_val_adj',
+      title = paste0(ct, "\nOld vs Young"), subtitle = NULL, caption = NULL,
+      pCutoff = 0.05, FCcutoff = 0.1, pointSize = 2.0, labSize = 4.0,
+      legendPosition = 'none', drawConnectors = TRUE, widthConnectors = 0.5
+    )
+  }
+}
+print(wrap_plots(volcanos_age, ncol = 5))
+
+
+# =========================================================================
+# 2. Volcano Plots: SnC+ vs SnC- (FILTER OUT GATING GENES - Unbiased Hits)
+# =========================================================================
+hsskin.ST$celltype_snc <- paste0(hsskin.ST@meta.data[[celltype_col]], "_", hsskin.ST@meta.data[[snc_col]])
+Idents(hsskin.ST) <- "celltype_snc"
+
+volcanos_snc <- list()
+for (ct in major_types) {
+  ident_snc_pos <- paste0(ct, "_SnC+")
+  ident_snc_neg <- paste0(ct, "_SnC-")
+  
+  n_pos <- sum(Idents(hsskin.ST) == ident_snc_pos)
+  n_neg <- sum(Idents(hsskin.ST) == ident_snc_neg)
+  
+  if (n_pos >= 3 && n_neg >= 3) {
+    degs <- FindMarkers(hsskin.ST, ident.1 = ident_snc_pos, ident.2 = ident_snc_neg, 
+                        min.pct = 0, logfc.threshold = 0)
+    
+    # CRITICAL: Strip out the predictable rule conditions
+    degs_filtered <- degs[!rownames(degs) %in% gating_genes, ]
+    
+    volcanos_snc[[ct]] <- EnhancedVolcano(
+      degs_filtered, lab = rownames(degs_filtered), x = 'avg_log2FC', y = 'p_val_adj',
+      title = paste0(ct, "\nSnC+ vs SnC- (Filtered)"), subtitle = NULL, caption = NULL,
+      pCutoff = 0.05, FCcutoff = 0.1, pointSize = 2.0, labSize = 4.0,
+      legendPosition = 'none', drawConnectors = TRUE, widthConnectors = 0.5
+    )
+  }
+}
+print(wrap_plots(volcanos_snc, ncol = 5))
+
+
+# =========================================================================
+# 3. Global SnC+ vs SnC- (FILTER OUT GATING GENES)
+# =========================================================================
+Idents(hsskin.ST) <- "snc"
+degs_all <- FindMarkers(hsskin.ST, ident.1 = "SnC+", ident.2 = "SnC-", min.pct = 0, logfc.threshold = 0)
+
+# Mask out rule conditions to unveil unexpected underlying biology
+degs_all_filtered <- degs_all[!rownames(degs_all) %in% gating_genes, ]
+
+p_volcano_all <- EnhancedVolcano(
+  degs_all_filtered, lab = rownames(degs_all_filtered), x = 'avg_log2FC', y = 'p_val_adj',
+  title = "Global SnC+ vs SnC- (Gating Genes Excluded)",
+  subtitle = "All cell types combined",
+  pCutoff = 0.05, FCcutoff = 0.1, pointSize = 2.0, labSize = 4.0,
+  legendPosition = 'right', drawConnectors = TRUE,
+  col = c('grey', '#000080', 'darkgreen', '#a00000')
+)
+print(p_volcano_all)
+# ---------------------------------------------------------
+# 3. Save
+# ---------------------------------------------------------
+ggsave("results/260506/xenium_skin_major_old_vs_young_volcanos.pdf",
+       p_age_grid, width = 12, height = 8, dpi = 300)
+
+ggsave("results/260506/xenium_skin_major_snc_vs_nonsnc_volcanos.pdf",
+       p_snc_grid, width = 10, height = 8, dpi = 300)
+```
+

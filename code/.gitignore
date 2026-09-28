@@ -1,0 +1,21 @@
+# R / RStudio
+.Rproj.user/
+.Rhistory
+.RData
+.RDataTmp
+.Ruserdata
+*.Rproj
+
+# Python / notebooks
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Generated outputs
+results/
+audit_outputs/
+data/
+
+# OS files
+.DS_Store
+Thumbs.db

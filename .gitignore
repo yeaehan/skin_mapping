@@ -1,0 +1,30 @@
+# Data, derived results, and external resources
+data/
+results/
+rsc/
+pptx/
+
+# Local environments and editor state
+.conda_envs/
+.conda_pkgs/
+.tmp/
+.vscode/
+.Rhistory
+.RData
+.Rproj.user/
+
+# Generated caches and documents
+__pycache__/
+*.py[cod]
+*.html
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.pptx
+*.docx
+Thumbs.db
+.DS_Store
+
+# Retained locally only; exact duplicate of code/4i/analysis/01A_4i_human_cell_type_analysis.R
+code/1_4i_cell_type_analysis.R

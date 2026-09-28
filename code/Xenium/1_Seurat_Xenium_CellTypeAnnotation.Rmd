@@ -1,0 +1,544 @@
+---
+title: "1_Seurat_CellTypeAnnotation_CODEX"
+output: html_document
+date: "2025-10-31"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align='center', fig.width=12, fig.height = 8)
+
+hsskin.ST <- readRDS("data/skin.rds")
+hsskin <- readRDS("data/skin.rds")
+
+saveRDS(hsskin.ST, "data/skin.rds")
+```
+
+```{r warning=FALSE, message=FALSE}
+library(Seurat)
+library(tidyverse)
+library(magrittr)
+library(ggplot2)
+library(patchwork)
+library(sctransform)
+library(cowplot)
+library(harmony)
+library(purrr)
+
+
+require(future)
+availableCores()
+plan("multisession", workers = 4)
+options(future.globals.maxSize = 8000 * 1024^2)
+```
+
+```{r}
+samples <- list.files("data")
+clean_samples <- samples[grepl("^1_", samples)]
+sceList <- list()
+for (i in seq_along(clean_samples)) {
+  sceList[[i]] <- readRDS(file = paste0("data/", clean_samples[i]))
+  sceList[[i]]$sample <- clean_samples[i]
+  sceList[[i]]$age <- ifelse(grepl("_Y", clean_samples[i]), "Young", "Old")
+}
+
+# # filtering by nCount and nFeatures per individual
+# filterCell <- function(combined){
+#   # calculate the quantile range
+#   count.feature.ls <- combined@meta.data[, c("nCount_RNA", "nFeature_RNA")]
+#   count.feature.ls %<>% map(log10) %>% map(~c(10^(mean(.x) + 3*sd(.x)), 10^(mean(.x) - 3*sd(.x))))
+#   
+#   print(count.feature.ls)
+# 
+#   # # filter cells
+#   # combined <- subset(combined, subset = nFeature_RNA > 200 & 
+#   #                    nFeature_RNA < count.feature.ls[[2]][1] & 
+#   #                    nCount_RNA < count.feature.ls[[1]][1]) 
+#   # return(combined)
+# }
+# 
+# walk(sceList, filterCell)
+# 
+# sceList %<>% map(filterCell)
+
+
+xenium.com <- merge(sceList[[1]], 
+                      y = c(sceList[[2]], sceList[[3]], sceList[[4]], sceList[[5]], sceList[[6]]), 
+                      add.cell.ids = clean_samples, 
+                      project = "human_skin")
+VlnPlot(
+  hswound.com,
+  features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo", "percent.hb"),
+  ncol = 2, pt.size=0.0001)
+
+```
+
+```{r fig.align='center', fig.width=12, fig.height=12}
+
+VlnPlot(
+  xenium.com,
+  features = c("nFeature_RNA", "nCount_RNA"),
+  ncol = 2, pt.size=0.0001)
+
+```
+
+## New Cell Type Annotation 260513
+
+```{r}
+# Create a named vector mapping clusters to major cell types
+cluster_to_major <- c(
+  `0`  = "Keratinocytes",
+  `1`  = "Fibroblasts",
+  `2`  = "Keratinocytes",
+  `3`  = "Keratinocytes",
+  `4`  = "Keratinocytes",
+  `5`  = "Keratinocytes",
+  `6`  = "Immune Cells",
+  `7`  = "Fibroblasts",
+  `8`  = "Fibroblasts",
+  `9`  = "Melanocytes",
+  `10` = "Blood Vessel Cells",
+  `11` = "Blood Vessel Cells",
+  `12` = "Keratinocytes",
+  `13` = "Fibroblasts",
+  `14` = "Fibroblasts",
+  `15` = "Keratinocytes",
+  `16` = "Immune Cells",
+  `17` = "Immune Cells",
+  `18` = "Muscle Cells",
+  `19` = "Keratinocytes",
+  `20` = "Keratinocytes",
+  `21` = "Immune Cells",
+  `22` = "Immune Cells",
+  `23` = "Immune Cells",
+  `24` = "Immune Cells",
+  `25` = "Keratinocytes",
+  `26` = "Blood Vessel Cells",
+  `27` = "Immune Cells",
+  `28` = "Keratinocytes",
+  `29` = "Immune Cells"
+)
+
+# Convert factor -> character before mapping
+hsskin.ST$cell_type_major <- unname(
+  cluster_to_major[
+    as.character(hsskin.ST$SCT_snn_res.1)
+  ]
+)
+
+# Optional: set factor order
+hsskin.ST$cell_type_major <- factor(
+  hsskin.ST$cell_type_major,
+  levels = c(
+    "Keratinocytes",
+    "Fibroblasts",
+    "Melanocytes",
+    "Muscle Cells",
+    "Blood Vessel Cells",
+    "Immune Cells"
+  )
+)
+
+# Check annotation counts
+table(hsskin.ST$SCT_snn_res.0.3, hsskin.ST$cell_type_major)
+
+Idents(hsskin.ST) <- 'SCT_snn_res.1'
+DimPlot(hsskin.ST)
+
+Idents(hsskin.ST) <- 'cell_type_major'
+DimPlot(hsskin.ST)
+```
+
+
+```{r}
+cluster_to_minor <- c(
+  `0`  = "Spinous Keratinocytes",
+  `1`  = "Reticular Fibroblasts",
+  `2`  = "Basal Keratinocytes",
+  `3`  = "Spinous Keratinocytes",
+  `4`  = "Basal Keratinocytes",
+  `5`  = "Hair Follicle Cells",
+  `6`  = "CD4+ T Cells",
+  `7`  = "Reticular Fibroblasts",
+  `8`  = "Papillary Fibroblasts",
+  `9`  = "Melanocytes",
+  `10` = "Endothelial Cells",
+  `11` = "Endothelial Cells",
+  `12` = "Granular Keratinocytes",
+  `13` = "Reticular Fibroblasts",
+  `14` = "Dermal Fibroblasts",
+  `15` = "Bulge Keratinocytes",
+  `16` = "Langerhans Cells",
+  `17` = "Macrophages",
+  `18` = "Muscle Cells",
+  `19` = "Granular Keratinocytes",
+  `20` = "Basal Keratinocytes",
+  `21` = "CD8+ T Cells/NK Cells",
+  `22` = "Dendritic Cells",
+  `23` = "Mast Cells",
+  `24` = "Dendritic Cells",
+  `25` = "Granular Keratinocytes",
+  `26` = "Endothelial Cells",
+  `27` = "Langerhans Cells",
+  `28` = "Spinous Keratinocytes",
+  `29` = "B Cells"
+)
+
+# Convert factor -> character before mapping
+hsskin.ST$cell_type_minor <- unname(
+  cluster_to_minor[
+    as.character(hsskin.ST$SCT_snn_res.1)
+  ]
+)
+
+minor_colors <- c(
+  # --- Keratinocyte / Epidermal / Epithelial Family (Browns, Tans, Reds) ---
+  "Basal Keratinocytes"           = "#dfc299", # Golden Tan
+  "Bulge Keratinocytes"           = "#e7dbc9", # Light Bone Tan
+  "Spinous Keratinocytes"         = "#a0816c", # Wood Brown
+  "Granular Keratinocytes"        = "#6e5646", # Dark Bark Brown
+  "Hair Follicle Cells"           = "#d14949", # Coral Red
+  
+  # --- Dermal Stromal / Structural Family (Greens, Blues, Purples) ---
+  "Papillary Fibroblasts"         = "#a6dbb1", # Soft Mint Green (Light Dermal)
+  "Reticular Fibroblasts"         = "#136432", # Forest Green (Deep Dermal)
+  "Dermal Fibroblasts"            = "#54a868", # Intermediate Green (General Dermal)
+  "Endothelial Cells"             = "#4393c3", # Steel Blue
+  "Muscle Cells"                  = "#6a3d9a", # Deep structural Violet
+  
+  # --- Immune Lymphoid Lineages (High-Contrast Pinks, Magentas, Plums) ---
+  "CD4+ T Cells"                  = "#ff69b4", # Bright Hot Pink (Unified map target)
+  "CD8+ T Cells/NK Cells"         = "#e3d3e8", # Blackberry (Matches cluster 21)
+  "B Cells"                       = "#984ea3", # Vibrant Orchid Purple
+  
+  # --- Immune Myeloid Lineages (Teals, Oranges, Golds) ---
+  "Dendritic Cells"               = "#ffd700", # Bright Gold
+  "Langerhans Cells"              = "#fcae91", # Warm Peach/Apricot (Fixed spelling typo)
+  "Macrophages"                   = "#01665e", # Deep Dermal Teal
+  "Mast Cells"                    = "#ff7f00", # Vivid Safety Orange (Assigned to cluster 23)
+  
+  # --- Outliers ---
+  "Melanocytes"                   = "grey"     # Grey baseline profile
+)
+
+# Check annotation counts
+table(hsskin.ST$SCT_snn_res.1, hsskin.ST$cell_type_minor)
+
+Idents(hsskin.ST) <- 'SCT_snn_res.1'
+
+# We map the cluster numbers directly to the colors of cluster_to_minor
+res03_colors <- minor_colors[cluster_to_minor]
+names(res03_colors) <- names(cluster_to_minor)
+
+p1 <- DimPlot(hsskin.ST, cols = res03_colors, pt.size = 0.5, label = TRUE, repel = TRUE) + 
+  NoGrid() + 
+  ggtitle("Clusters at Resolution 1") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+
+
+
+# =========================================================================
+# Plot 2: Cell Type Minor (Using Text Labels mapped directly to minor_colors)
+# =========================================================================
+Idents(hsskin.ST) <- 'cell_type_minor'
+
+p2 <- DimPlot(hsskin.ST, cols = minor_colors, pt.size = 0.5, label = TRUE, repel = TRUE) + 
+  NoGrid() + 
+  ggtitle("Minor Cell Type Annotations") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+combined_plot <- p1 + p2 + 
+  plot_layout(widths = c(1.2, 1.2)) + 
+  plot_annotation(tag_levels = 'A') & 
+  theme(
+    plot.tag = element_text(face = "bold", size = 18),
+    legend.text = element_text(size = 9),       # Slightly shrinks legend text to avoid overlap
+    legend.key.size = unit(0.4, "cm")           # Shrinks the color dots to compress long legends vertically
+  )
+
+print(combined_plot)
+
+# 2. Save them together into a single PDF
+# Setting a wide width (14x7 or 16x8) is ideal for side-by-side DimPlots
+ggsave(
+  filename = "results/260523/minor_and_res1_expanded.pdf",
+  plot = combined_plot,
+  width = 20,         # <--- WIDENED significantly from 15 to stop horizontal squishing
+  height = 9,         # <--- Increased slightly from 7 to allow the 29-row legend to stack cleanly
+  device = "pdf",
+  useDingbats = FALSE
+)
+```
+
+
+## Further subclustering
+```{r}
+hsskin.ST <- UpdateSeuratObject(hsskin.ST)
+
+# --- Subcluster Cluster 1 (Basal/Langerhans) ---
+Idents(hsskin.ST) <- 'cell_type_minor'
+
+c1_subset <- subset(hsskin.ST, idents = "Naïve CD4+ T Cells")
+c1_subset <- FindNeighbors(c1_subset, dims = 1:10)
+c1_subset <- FindClusters(c1_subset, graph.name = "SCT_snn", resolution = 0.2) 
+# Markers to look for: CD1A/CD207 (Langerhans), MKI67 (Proliferating), KRT15 (Basal)
+c1_markers <- FindAllMarkers(c1_subset, only.pos = TRUE)
+
+write.csv(c1_markers, file = "results/260506/c1_markers.csv", row.names = FALSE)
+
+
+c5_subset <- subset(hsskin.ST, idents = "Age-associated CD8+ T Cells/NK Cells")
+c5_subset <- FindNeighbors(c5_subset, dims = 1:10)
+c5_subset <- FindClusters(c5_subset, graph.name = "SCT_snn", resolution = 0.2) 
+# Markers to look for: CD1A/CD207 (Langerhans), MKI67 (Proliferating), KRT15 (Basal)
+c5_markers <- FindAllMarkers(c5_subset, only.pos = TRUE)
+
+write.csv(c5_markers, file = "results/260506/c5_markers.csv", row.names = FALSE)
+
+
+# Example Sub-Mapping (Adjust labels based on your marker results)
+c1_labels <- c("0" = "Fibroblasts", "1" = "Naïve CD4+ T Cells", "2" = "Naïve CD4+ T Cells")
+c5_labels <- c(
+  "0" = "M2 Macrophages",                  
+  "1" = "Fibroblasts",                      # PDGFRA+ / DCN+ Contamination
+  "2" = "CD4+ Naïve T Cells",               # SELL+ / NELL2+ / LTB+
+  "3" = "CD8+ Exhausted T Cells",      # MKI67+ / IRF8+ Proliferating/Immune
+  "4" = "CD8+ Cytotoxic Age-associated T Cells", # CD8A/B+ / ZNF683+ / GZMA+ / GZMH+
+  "5" = "CD8+ T Cells",                     # Resting/Skinned Dermal T Cells
+  "6" = "Blood Vessel Cells",               # VWF+ / PLVAP+ Endothelial Contamination
+  "7" = "B Cells"                           # IGKC+ / JCHAIN+ / MZB1+ Plasma Cells
+)
+
+# Apply sub-labels to the subsets
+c1_subset$sub_type <- unname(c1_labels[as.character(Idents(c1_subset))])
+c5_subset$sub_type <- unname(c5_labels[as.character(Idents(c5_subset))])
+c8_subset$sub_type <- unname(c8_labels[as.character(Idents(c8_subset))])
+
+# Start with your existing minor labels
+hsskin.ST$cell_type_final <- as.character(hsskin.ST$cell_type_minor)
+
+# Replace the broad labels with the specific sub-labels using cell IDs
+hsskin.ST$cell_type_final[colnames(c1_subset)] <- c1_subset$sub_type
+hsskin.ST$cell_type_final[colnames(c5_subset)] <- c5_subset$sub_type
+hsskin.ST$cell_type_final[colnames(c8_subset)] <- c8_subset$sub_type
+
+# Final visualization
+# Define a high-contrast palette for your specific labels
+# High-distinction palette based on your color families
+final_colors <- c(
+  # =========================================================================
+  # 1) Keratinocyte / Epidermal Family (Browns, Tans, Reds)
+  # =========================================================================
+  "Basal Keratinocytes"                   = "#dfc299", # Golden Tan
+  "Spinous Keratinocytes"                 = "#a0816c", # Wood Brown
+  "Suprabasal Keratinocytes"              = "#6e5646", # Dark Bark Brown
+  "Corneocytes"                           = "#a52829", # Deep Brick Red
+  "Hair Follicles"                        = "#d14949", # Coral Red
+  
+  # =========================================================================
+  # 2) Stromal / Structural Family (Greens & Blues)
+  # =========================================================================
+  "Fibroblasts"                           = "#136432", # Forest Green
+  "Blood Vessel Cells"                    = "#4393c3", # Steel Blue
+  "Smooth Muscle Cells"                   = "#6a3d9a", # Deep structural Violet
+  
+  # =========================================================================
+  # 3) Lymphoid Immune Compartment (High-Contrast Pinks, Magentas, Plums)
+  # =========================================================================
+  "CD4+ Naïve T Cells"                    = "#ff69b4", # Bright Hot Pink
+  "CD8+ T Cells"                          = "#c51b7d", # Classic Deep Pink
+  "CD8+ Exhausted T Cells"                = "#de77ae", # Soft Pastel Pink
+  "CD8+ Cytotoxic Age-associated T Cells"  = "#4d004b", # Blackberry (Very dark black-purple)
+  "B Cells"                               = "#984ea3", # Vibrant Orchid Purple
+  
+  # =========================================================================
+  # 4) Myeloid Immune Compartment (Moved out of Pink into Teal, Orange, Gold)
+  # =========================================================================
+  "Dendritic Cells"                       = "#ffd700", # Bright Gold
+  "Langerhans Cells"                      = "#fcae91", # Warm Light Apricot / Peach
+  "Macrophages"                           = "#01665e", # Deep Dermal Teal
+  "M2 Macrophages"                        = "#ff7f00", # Vivid Safety Orange
+  
+  # =========================================================================
+  # 5) Outliers
+  # =========================================================================
+  "Melanocytes"                           = "grey"     # Grey (Kept exactly as requested)
+)
+
+Idents(hsskin.ST) <- "cell_type_final"
+
+# 3. Plot with high distinction
+p_final <- DimPlot(hsskin.ST, 
+        reduction = "umap", 
+        cols = final_colors, 
+        pt.size = 0.5, 
+        label = TRUE,
+        repel = TRUE, 
+        label.size = 5)+ 
+  NoGrid() + 
+  theme(
+    #plot.title = element_text(hjust = 0.5, face = "bold"),
+    panel.grid.major = element_blank(), # Extra insurance to force grids off
+    panel.grid.minor = element_blank()
+  )
+
+ggsave("results/260506/xenium_umap_celltype_final.pdf", p_final, width = 10, height = 8, dpi = 300)
+
+```
+
+```{r}
+library(Seurat)
+library(dplyr)
+library(writexl) # installation: install.packages("writexl")
+
+# ----------------------------------------------------------------------
+# 1) Extract and Clean FOV Coordinates (Your Pipeline Logic)
+# ----------------------------------------------------------------------
+fov_names <- Images(hsskin.ST)
+
+extract_fov_coords <- function(obj, fov_name) {
+  coords <- GetTissueCoordinates(obj[[fov_name]])
+  coords <- as.data.frame(coords)
+  coords$cell_id <- rownames(coords)
+  coords$fov <- fov_name
+  
+  # Find numeric columns dynamically (x and y)
+  numeric_cols <- names(coords)[sapply(coords, is.numeric)]
+  if (length(numeric_cols) < 2) {
+    stop(paste("Could not find at least two numeric coordinate columns for", fov_name))
+  }
+  
+  coords <- coords %>%
+    rename(
+      x = all_of(numeric_cols[1]),
+      y = all_of(numeric_cols[2])
+    )
+  
+  return(coords)
+}
+
+# Combine coordinates across all FOVs
+coords_all <- bind_rows(lapply(fov_names, function(f) extract_fov_coords(hsskin.ST, f)))
+
+# Clean or align cell naming conventions
+if ("cell" %in% colnames(coords_all)) {
+  coords_all <- coords_all %>%
+    select(-cell_id) %>%
+    rename(cell_id = cell)
+}
+
+# ----------------------------------------------------------------------
+# 2) Extract and Select Requested Metadata Columns
+# ----------------------------------------------------------------------
+metadata_df <- hsskin.ST@meta.data
+
+# Build structured data frame incorporating age and sample
+md_clean <- data.frame(
+  cell_id         = rownames(metadata_df),
+  age             = if("age" %in% colnames(metadata_df)) metadata_df$age else NA,
+  sample          = if("sample" %in% colnames(metadata_df)) metadata_df$sample else NA,
+  cell_type_major = if("cell_type_major" %in% colnames(metadata_df)) metadata_df$cell_type_major else NA,
+  cell_type_minor = if("cell_type_minor" %in% colnames(metadata_df)) metadata_df$cell_type_minor else NA,
+  stringsAsFactors = FALSE
+)
+
+# Dynamically pull the correct senescence definition column (snc or snc2)
+if ("snc" %in% colnames(metadata_df)) {
+  md_clean$snc <- metadata_df$snc
+} else if ("snc2" %in% colnames(metadata_df)) {
+  md_clean$snc <- metadata_df$snc2
+} else {
+  md_clean$snc <- NA
+  warning("Neither 'snc' nor 'snc2' column was found in the metadata.")
+}
+
+# ----------------------------------------------------------------------
+# 3) Merge, Order Columns, and Save Workbook
+# ----------------------------------------------------------------------
+excel_data <- coords_all %>%
+  left_join(md_clean, by = "cell_id") %>%
+  select(cell_id, x, y, fov, age, sample, cell_type_major, cell_type_minor, snc)
+
+# Save Workbook
+output_excel_path <- "results/260523/xenium_skin_comprehensive_metadata.xlsx"
+write_xlsx(excel_data, path = output_excel_path)
+
+cat("Successfully compiled spatial coordinates, demographics, and annotations into Excel:\n", 
+    getwd(), "/", output_excel_path, "\n", sep="")
+```
+
+
+
+
+```{r}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# ----------------------------------------------------------------------
+# 1) Subset Object to Keep "Old" Cohort and Filter NAs
+# ----------------------------------------------------------------------
+obj_old_pos <- subset(
+  x = hsskin.ST,
+  subset = age == "Old" & 
+           !is.na(cell_type_minor) & 
+           !is.na(snc)  # Adjust to "snc2" if that is your active flag column
+)
+
+# ----------------------------------------------------------------------
+# 2) Restrict Order Array STRICTLY to Skin Structural Populations
+# ----------------------------------------------------------------------
+# Structural vertical tissue layer hierarchy omitting immune subsets
+custom_axis_order <- c(
+  "Muscle Cells",
+  "Endothelial Cells",
+  "Melanocytes",
+  "Dermal Fibroblasts",
+  "Reticular Fibroblasts",
+  "Papillary Fibroblasts",
+  "Hair Follicle Cells",
+  "Bulge Keratinocytes",
+  "Basal Keratinocytes",
+  "Spinous Keratinocytes",
+  "Granular Keratinocytes"
+)
+
+# Keep only cells matching your structural list
+cells_to_keep <- rownames(obj_old_pos@meta.data)[obj_old_pos$cell_type_minor %in% custom_axis_order]
+obj_old_pos <- subset(obj_old_pos, cells = cells_to_keep)
+
+# Lock in the anatomical sequence
+obj_old_pos$cell_type_minor <- factor(
+  obj_old_pos$cell_type_minor, 
+  levels = custom_axis_order
+)
+
+# Assign identities for the DotPlot engine
+Idents(obj_old_pos) <- "cell_type_minor"
+
+# ----------------------------------------------------------------------
+# 3) Generate the Base Multi-Feature Matrix Plot 
+# ----------------------------------------------------------------------
+p_base <- DotPlot(
+  object = obj_old_pos,
+  features = c("CDKN2A", "CDKN1A"), # Human gene symbols
+  assay = "Xenium",                 
+  col.min = NULL, 
+  col.max = NULL  
+) + 
+  scale_color_gradientn(
+    colors = c("#2166ac", "#67a9cf", "#f7f7f7", "#ef8a62", "#b2182b"),
+    #name = "CDKN2A (p16)\nMean Expression"
+  )
+
+# Save high-resolution vectorized output layout
+ggsave(
+  filename = "results/260523/xenium_skin_structural_unscaled_dotplot.pdf",
+  plot = p_base,
+  width = 6.2, 
+  height = 5.5,
+  dpi = 300
+)
+```
+

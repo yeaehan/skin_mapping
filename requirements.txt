@@ -1,0 +1,42 @@
+# Python requirements for the skin_mapping_2 analysis code.
+#
+# Environment used on this workstation:
+#   Z:\Yeaeun\ana\skin_mapping_2\.conda_envs\skin_mapping
+#
+# C: was nearly full, so keep the env on the mapped workspace drive. Use the
+# mapped drive path when running scripts; importing compiled packages directly
+# from the raw UNC path can be slow/flaky on Windows.
+#
+# Create/update:
+#   conda create -y --prefix Z:\Yeaeun\ana\skin_mapping_2\.conda_envs\skin_mapping python=3.10 pip
+#   Z:\Yeaeun\ana\skin_mapping_2\.conda_envs\skin_mapping\python.exe -m pip install -r requirements.txt
+#
+# Core scientific stack used by code/**/*.py
+numpy
+pandas
+scipy
+matplotlib
+seaborn
+h5py
+anndata
+scanpy
+squidpy
+setuptools<81  # spatialdata/xarray-schema still imports pkg_resources
+harmonypy
+python-pptx
+openpyxl
+
+# MuSpAn Getis-Ord hotspot script:
+# code/Xenium/analysis/24_xenium_muspan_getis_ord_hotspots.py
+#
+# MuSpAn is distributed from a credential-protected URL. This line prompts for
+# the username/password supplied by the MuSpAn team, and will fail with HTTP 401
+# until those credentials are provided.
+https://docs.muspan.co.uk/code/latest.zip
+
+# Optional external/reference script only:
+# rsc/.../cell2location_run.py imports cell2location and scvi. These are not
+# required for the active Xenium/Sinai/Visium validation scripts and may need a
+# Linux/GPU-oriented setup rather than this Windows env.
+# cell2location
+# scvi-tools

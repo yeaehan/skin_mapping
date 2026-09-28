@@ -1,0 +1,94 @@
+---
+title: "1_Seurat_CellTypeAnnotation_CODEX"
+output: html_document
+date: "2025-10-31"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align='center', fig.width=12, fig.height = 8)
+```
+
+```{r warning=FALSE, message=FALSE}
+library(Seurat)
+library(tidyverse)
+library(magrittr)
+library(ggplot2)
+library(patchwork)
+library(sctransform)
+library(cowplot)
+library(harmony)
+```
+
+#####
+#Step 1: Load the Seurat object 
+#####
+
+```{r eval=FALSE, warning=FALSE, message=FALSE}
+setwd('//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2')
+codex <- readRDS(here("data", "codex.rds"))
+codex <- readRDS("//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data/codex.rds")
+
+setwd("..")
+```
+
+## Cell Type Proportion Plots
+
+```{r pressure, echo=FALSE}
+codex$age <- factor(hsskin.ST$age, levels = c("Young", "Old"))
+
+
+immsen3 <- as.data.frame(table(codex$age, codex$skincelltype))
+
+cells <- as.data.frame(immsen3 %>%
+                           group_by(Var1) %>%
+                           mutate(Freq = Freq / sum(Freq)))
+# cells <- cells[cells$Var2 != 'none',]
+# cells <- cells[cells$Var2 != 'CD45+',]
+
+cells <- cells %>%
+  group_by(Var1) %>%
+  mutate(Percentage = round(Freq * 100, 1))  # Convert proportion to percentage
+
+library(ggplot2)
+stacked_barplot <- ggplot(cells, aes(x = Var1, y = Freq, fill = Var2)) +
+  geom_bar(stat = "identity", position = "stack") +
+  theme_minimal() +
+  labs(
+    title = "Proportion of  Cell Types in Young vs. Old",
+    x = "Age Group",
+    y = "Proportion",
+    fill = "Cell Types"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 12)
+  )
+
+stacked_barplot <- ggplot(cells, aes(x = Var1, y = Freq, fill = Var2)) +
+  geom_bar(stat = "identity", position = "stack", color = "black") +  # Black borders
+  geom_text(aes(label = paste0(Percentage, "%")),
+            position = position_stack(vjust = 0.5),
+            size = 2, color = "black") +  # Percentage labels inside bars
+  theme_minimal() +
+  labs(
+    title = "Proportion of Cell Types in Young vs. Old",
+    x = "Age Group",
+    y = "Proportion",
+    fill = "Cell Types"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 12)
+  )
+
+# Display the plot
+print(stacked_barplot)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

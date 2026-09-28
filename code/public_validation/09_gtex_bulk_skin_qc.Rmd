@@ -1,0 +1,1071 @@
+---
+title: "GTEx Bulk Skin RNA-seq QC"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: readable
+params:
+  project_root: "."
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+suppressPackageStartupMessages({
+  library(data.table)
+  library(dplyr)
+  library(ggplot2)
+  library(readr)
+  library(stringr)
+  library(tidyr)
+  library(knitr)
+  library(DESeq2)
+})
+
+find_project_root <- function(start = NULL) {
+  candidates <- c(
+    Sys.getenv("SKIN_MAPPING_PROJECT_ROOT", unset = NA_character_),
+    if (exists("params") && !is.null(params$project_root)) params$project_root else NA_character_,
+    getwd()
+  )
+  candidates <- candidates[!is.na(candidates) & nzchar(candidates)]
+
+  for (candidate in candidates) {
+    current <- normalizePath(candidate, winslash = "/", mustWork = FALSE)
+    for (i in seq_len(8)) {
+      if (dir.exists(file.path(current, "data", "external"))) {
+        return(current)
+      }
+      parent <- dirname(current)
+      if (identical(parent, current)) break
+      current <- parent
+    }
+  }
+  stop("Could not find project root containing data/external")
+}
+
+project_root <- find_project_root()
+data_dir <- file.path(project_root, "data", "external")
+out_dir <- file.path(project_root, "results", "260727", "gtex_bulk_skin_qc")
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+gct_files <- c(
+  "Skin - Sun Exposed (Lower leg)" =
+    file.path(data_dir, "gene_reads_adult_gtex_v11_skin_sun_exposed_lower_leg.gct.gz"),
+  "Skin - Not Sun Exposed (Suprapubic)" =
+    file.path(data_dir, "gene_reads_adult_gtex_v11_skin_not_sun_exposed_suprapubic.gct.gz")
+)
+
+subject_pheno_path <- file.path(data_dir, "GTEx_Analysis_v11_Annotations_SubjectPhenotypesDS.txt")
+sample_attr_path <- file.path(data_dir, "GTEx_Analysis_v11_Annotations_SampleAttributesDS.txt")
+hpa_secreted_gene_path <- file.path(
+  project_root,
+  "results", "260727", "sinai_age_decade_trends_all_sites",
+  "hpa_predicted_secreted_gene_list.csv"
+)
+
+age_levels <- c("20-29", "30-39", "40-49", "50-59", "60-69", "70-79", "80-89")
+sex_labels <- c("1" = "Male", "2" = "Female")
+
+theme_set(theme_bw(base_size = 12))
+```
+
+## Input Files
+
+```{r input-files}
+input_table <- tibble(
+  input = c(names(gct_files), "Subject phenotype metadata", "Sample attribute metadata"),
+  path = c(unname(gct_files), subject_pheno_path, sample_attr_path),
+  exists = file.exists(path),
+  size_mb = round(file.info(path)$size / 1024^2, 1)
+)
+
+kable(input_table)
+```
+
+## Helper Functions
+
+```{r helpers}
+read_gct_counts <- function(path) {
+  counts_dt <- fread(path, skip = 2)
+  sample_ids <- setdiff(colnames(counts_dt), c("Name", "Description"))
+  count_mat <- as.matrix(counts_dt[, ..sample_ids])
+  storage.mode(count_mat) <- "integer"
+  rownames(count_mat) <- make.unique(as.character(counts_dt$Name))
+  list(
+    counts = count_mat,
+    sample_ids = sample_ids,
+    gene_ids = as.character(counts_dt$Name),
+    gene_symbols = as.character(counts_dt$Description)
+  )
+}
+
+prepare_ensembl_counts <- function(gct) {
+
+  ensembl_versioned <- as.character(gct$gene_ids)
+  ensembl_id <- sub("\\..*$", "", ensembl_versioned)
+  gene_symbol <- as.character(gct$gene_symbols)
+
+  keep <- (
+    !is.na(gene_symbol) &
+    gene_symbol != ""
+  )
+
+  counts <- gct$counts[
+    keep,
+    ,
+    drop = FALSE
+  ]
+
+  ensembl_versioned <- ensembl_versioned[keep]
+  ensembl_id <- ensembl_id[keep]
+  gene_symbol <- gene_symbol[keep]
+
+  # Make symbols unique WITHOUT collapsing rows
+  gene_symbol_unique <- make.unique(gene_symbol, sep = ".")
+
+  rownames(counts) <- gene_symbol_unique
+  counts
+}
+
+estimate_deseq2_size_factors <- function(count_mat) {
+  count_mat <- count_mat[rowSums(count_mat) > 0, , drop = FALSE]
+  col_data <- data.frame(row.names = colnames(count_mat), sample_id = colnames(count_mat))
+  dds <- DESeqDataSetFromMatrix(
+    countData = count_mat,
+    colData = col_data,
+    design = ~ 1
+  )
+  dds <- estimateSizeFactors(dds)
+  tibble(
+    sample_id = names(sizeFactors(dds)),
+    deseq2_size_factor = as.numeric(sizeFactors(dds))
+  )
+}
+
+summarize_count_qc <- function(site, path) {
+  gct <- read_gct_counts(path)
+  count_mat <- gct$counts
+  size_factors <- estimate_deseq2_size_factors(count_mat)
+
+  tibble(
+    sample_id = colnames(count_mat),
+    bulk_skin_site = site,
+    total_counts = as.numeric(colSums(count_mat)),
+    detected_genes = as.numeric(colSums(count_mat > 0)),
+    n_genes_in_matrix = nrow(count_mat)
+  ) %>%
+    left_join(size_factors, by = "sample_id")
+}
+
+save_plot <- function(plot, filename, width = 10, height = 6) {
+  ggsave(file.path(out_dir, paste0(filename, ".png")), plot, width = width, height = height, dpi = 300)
+  ggsave(file.path(out_dir, paste0(filename, ".pdf")), plot, width = width, height = height)
+  plot
+}
+```
+
+## Sample Metadata
+
+```{r metadata}
+subject_pheno <- fread(subject_pheno_path) %>%
+  as_tibble() %>%
+  mutate(
+    donor_id = SUBJID,
+    age_bin = factor(AGE, levels = age_levels, ordered = TRUE),
+    sex = recode(as.character(SEX), !!!sex_labels, .default = as.character(SEX))
+  ) %>%
+  select(donor_id, sex, age_bin, DTHHRDY)
+
+sample_attr <- fread(sample_attr_path) %>%
+  as_tibble() %>%
+  transmute(
+    sample_id = SAMPID,
+    donor_id = str_extract(SAMPID, "^GTEX-[^-]+"),
+    sample_tissue = SMTSD,
+    tissue_major = SMTS,
+    rin = as.numeric(SMRIN),
+    center = SMCENTER,
+    ischemic_time = suppressWarnings(as.numeric(SMTSISCH)),
+    extraction_batch = SMNABTCH,
+    sequencing_batch = SMGEBTCH
+  )
+```
+
+## Per-Sample QC Table
+
+```{r qc-table, message=TRUE}
+qc <- bind_rows(lapply(names(gct_files), function(site) {
+  message("Reading and summarizing: ", site)
+  summarize_count_qc(site, gct_files[[site]])
+})) %>%
+  left_join(sample_attr, by = "sample_id") %>%
+  left_join(subject_pheno, by = "donor_id") %>%
+  mutate(
+    age_bin = factor(age_bin, levels = age_levels, ordered = TRUE),
+    log10_total_counts = log10(total_counts + 1),
+    log10_detected_genes = log10(detected_genes + 1),
+    log10_size_factor = log10(deseq2_size_factor)
+  )
+
+write_csv(qc, file.path(out_dir, "gtex_bulk_skin_sample_qc.csv"))
+
+qc_summary <- qc %>%
+  group_by(bulk_skin_site) %>%
+  summarise(
+    n_samples = n(),
+    n_donors = n_distinct(donor_id),
+    median_total_counts = median(total_counts, na.rm = TRUE),
+    median_detected_genes = median(detected_genes, na.rm = TRUE),
+    median_rin = median(rin, na.rm = TRUE),
+    median_size_factor = median(deseq2_size_factor, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+kable(qc_summary)
+```
+
+## Age, Sex, and Site Coverage
+
+```{r coverage}
+coverage <- qc %>%
+  dplyr::count(bulk_skin_site, age_bin, sex, name = "n_samples") %>%
+  arrange(bulk_skin_site, age_bin, sex)
+
+write_csv(coverage, file.path(out_dir, "gtex_bulk_skin_age_sex_site_counts.csv"))
+kable(coverage)
+```
+
+```{r coverage-plot, fig.width=10, fig.height=5}
+p_coverage <- ggplot(qc, aes(age_bin, fill = sex)) +
+  geom_bar(position = "dodge", color = "grey30", linewidth = 0.2) +
+  facet_wrap(~ bulk_skin_site, nrow = 1) +
+  scale_fill_manual(values = c("Male" = "#4C78A8", "Female" = "#E45756"), na.value = "grey70") +
+  labs(
+    title = "GTEx bulk skin sample coverage",
+    x = "GTEx age bin",
+    y = "Number of samples",
+    fill = "Sex"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+save_plot(p_coverage, "gtex_bulk_skin_age_sex_site_coverage", width = 11, height = 5)
+```
+
+## Library Size QC
+
+```{r total-counts, fig.width=11, fig.height=6}
+p_total_counts <- ggplot(qc, aes(age_bin, total_counts / 1e6, color = sex)) +
+  geom_boxplot(aes(group = age_bin), outlier.shape = NA, color = "grey45") +
+  geom_jitter(width = 0.18, height = 0, alpha = 0.65, size = 1.2) +
+  facet_wrap(~ bulk_skin_site, nrow = 1, scales = "free_y") +
+  scale_color_manual(values = c("Male" = "#4C78A8", "Female" = "#E45756"), na.value = "grey50") +
+  labs(
+    title = "Total counts per sample",
+    x = "GTEx age bin",
+    y = "Total raw counts (millions)",
+    color = "Sex"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+save_plot(p_total_counts, "gtex_bulk_skin_total_counts_by_age_site_sex", width = 11, height = 6)
+```
+
+## Detected Gene QC
+
+```{r detected-genes, fig.width=11, fig.height=6}
+p_detected_genes <- ggplot(qc, aes(age_bin, detected_genes, color = sex)) +
+  geom_boxplot(aes(group = age_bin), outlier.shape = NA, color = "grey45") +
+  geom_jitter(width = 0.18, height = 0, alpha = 0.65, size = 1.2) +
+  facet_wrap(~ bulk_skin_site, nrow = 1, scales = "free_y") +
+  scale_color_manual(values = c("Male" = "#4C78A8", "Female" = "#E45756"), na.value = "grey50") +
+  labs(
+    title = "Detected genes per sample",
+    x = "GTEx age bin",
+    y = "Genes with raw count > 0",
+    color = "Sex"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+save_plot(p_detected_genes, "gtex_bulk_skin_detected_genes_by_age_site_sex", width = 11, height = 6)
+```
+
+## RIN QC
+
+```{r rin-qc, fig.width=11, fig.height=6}
+p_rin <- ggplot(qc, aes(age_bin, rin, color = sex)) +
+  geom_boxplot(aes(group = age_bin), outlier.shape = NA, color = "grey45") +
+  geom_jitter(width = 0.18, height = 0, alpha = 0.65, size = 1.2) +
+  facet_wrap(~ bulk_skin_site, nrow = 1) +
+  scale_color_manual(values = c("Male" = "#4C78A8", "Female" = "#E45756"), na.value = "grey50") +
+  labs(
+    title = "RNA integrity number by age bin",
+    x = "GTEx age bin",
+    y = "SMRIN",
+    color = "Sex"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+save_plot(p_rin, "gtex_bulk_skin_rin_by_age_site_sex", width = 11, height = 6)
+```
+
+## DESeq2 Size Factor QC
+
+```{r size-factor-qc, fig.width=11, fig.height=6}
+p_size_factor <- ggplot(qc, aes(age_bin, deseq2_size_factor, color = sex)) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "grey45") +
+  geom_boxplot(aes(group = age_bin), outlier.shape = NA, color = "grey45") +
+  geom_jitter(width = 0.18, height = 0, alpha = 0.65, size = 1.2) +
+  facet_wrap(~ bulk_skin_site, nrow = 1, scales = "free_y") +
+  scale_color_manual(values = c("Male" = "#4C78A8", "Female" = "#E45756"), na.value = "grey50") +
+  labs(
+    title = "DESeq2 size factors by age bin",
+    x = "GTEx age bin",
+    y = "DESeq2 size factor",
+    color = "Sex"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+save_plot(p_size_factor, "gtex_bulk_skin_deseq2_size_factors_by_age_site_sex", width = 11, height = 6)
+```
+
+## QC Relationships
+
+```{r qc-relationships, fig.width=11, fig.height=6}
+p_counts_genes <- ggplot(qc, aes(total_counts / 1e6, detected_genes, color = age_bin, shape = sex)) +
+  geom_point(alpha = 0.75, size = 1.6) +
+  facet_wrap(~ bulk_skin_site, nrow = 1, scales = "free") +
+  labs(
+    title = "Library size versus detected genes",
+    x = "Total raw counts (millions)",
+    y = "Detected genes",
+    color = "Age bin",
+    shape = "Sex"
+  )
+
+save_plot(p_counts_genes, "gtex_bulk_skin_total_counts_vs_detected_genes", width = 11, height = 6)
+```
+
+```{r rin-relationships, fig.width=11, fig.height=6}
+p_rin_counts <- ggplot(qc, aes(rin, total_counts / 1e6, color = age_bin, shape = sex)) +
+  geom_point(alpha = 0.75, size = 1.6) +
+  facet_wrap(~ bulk_skin_site, nrow = 1, scales = "free_y") +
+  labs(
+    title = "RIN versus total counts",
+    x = "SMRIN",
+    y = "Total raw counts (millions)",
+    color = "Age bin",
+    shape = "Sex"
+  )
+
+save_plot(p_rin_counts, "gtex_bulk_skin_rin_vs_total_counts", width = 11, height = 6)
+```
+
+## Potential Outlier Flags
+
+```{r outlier-flags}
+qc_flags <- qc %>%
+  group_by(bulk_skin_site) %>%
+  mutate(
+    total_counts_z = as.numeric(scale(log10_total_counts)),
+    detected_genes_z = as.numeric(scale(log10_detected_genes)),
+    size_factor_z = as.numeric(scale(log10_size_factor)),
+    low_total_counts = total_counts_z < -3,
+    low_detected_genes = detected_genes_z < -3,
+    extreme_size_factor = abs(size_factor_z) > 3,
+    low_rin = !is.na(rin) & rin < 5,
+    qc_flag = low_total_counts | low_detected_genes | extreme_size_factor | low_rin
+  ) %>%
+  ungroup()
+
+write_csv(qc_flags, file.path(out_dir, "gtex_bulk_skin_sample_qc_with_flags.csv"))
+
+flag_summary <- qc_flags %>%
+  dplyr::count(bulk_skin_site, qc_flag, name = "n_samples")
+
+kable(flag_summary)
+```
+
+```{r flagged-samples}
+flagged_samples <- qc_flags %>%
+  filter(qc_flag) %>%
+  select(
+    sample_id, donor_id, bulk_skin_site, age_bin, sex, rin,
+    total_counts, detected_genes, deseq2_size_factor,
+    low_total_counts, low_detected_genes, extreme_size_factor, low_rin
+  ) %>%
+  arrange(bulk_skin_site, age_bin, sample_id)
+
+kable(flagged_samples)
+```
+
+## Reusable DESeq2 Objects for Age-Trend Analysis
+
+```{r save-deseq2-objects, message=TRUE, warning=FALSE}
+
+
+
+# ============================================================
+# Helper: create a fitted DESeq2 object
+#
+# Primary question:
+#   Which genes show increasing expression with age?
+#
+# age_numeric:
+#   20-29 -> 1
+#   30-39 -> 2
+#   ...
+#   80-89 -> 7
+#
+# Therefore:
+#   positive age_numeric coefficient = increases with age
+# ============================================================
+message("Loading GTEx count matrices...")
+
+gct_data <- lapply(
+  gct_files,
+  read_gct_counts
+)
+
+make_age_deseq_object <- function(
+    site_names,
+    qc,
+    gct_data,
+    include_site = FALSE
+) {
+
+  count_list <- list()
+
+  # ----------------------------------------------------------
+  # Read raw counts for requested skin site(s)
+  # ----------------------------------------------------------
+
+  for (site in site_names) {
+
+    message("Preparing counts for: ", site)
+
+    gct <- gct_data[[site]]
+
+    counts <- prepare_ensembl_counts(gct)
+
+    count_list[[site]] <- counts
+  }
+
+
+  # ----------------------------------------------------------
+  # Ensure all site matrices use the same gene universe
+  #
+  # Do NOT remove zero-count genes before this step because a
+  # gene may be expressed in one skin site but not the other.
+  # ----------------------------------------------------------
+
+  common_genes <- Reduce(
+    intersect,
+    lapply(
+      count_list,
+      rownames
+    )
+  )
+
+  count_list <- lapply(
+    count_list,
+    function(x) {
+
+      x[
+        common_genes,
+        ,
+        drop = FALSE
+      ]
+
+    }
+  )
+
+
+  # ----------------------------------------------------------
+  # Combine samples across requested site(s)
+  # ----------------------------------------------------------
+
+  counts <- do.call(
+    cbind,
+    count_list
+  )
+
+
+  # ----------------------------------------------------------
+  # Remove genes with no expression across the entire analysis
+  # ----------------------------------------------------------
+
+  counts <- counts[
+    rowSums(counts) > 0,
+    ,
+    drop = FALSE
+  ]
+
+
+  # ----------------------------------------------------------
+  # Construct DESeq2 sample metadata
+  # ----------------------------------------------------------
+
+  col_data <- qc %>%
+
+    filter(
+      bulk_skin_site %in% site_names,
+      sample_id %in% colnames(counts)
+    ) %>%
+
+    distinct(
+      sample_id,
+      .keep_all = TRUE
+    ) %>%
+
+    mutate(
+
+      # Ordered decade number for testing an age-dependent trend
+      age_numeric = match(
+        as.character(age_bin),
+        age_levels
+      ),
+
+      sex = factor(
+        sex
+      ),
+
+      bulk_skin_site = factor(
+        bulk_skin_site
+      ),
+
+      rin = as.numeric(
+        rin
+      )
+    )
+
+
+  # ----------------------------------------------------------
+  # DESeq2 design variables cannot contain missing values.
+  #
+  # We currently adjust for:
+  #   - age (variable of interest)
+  #   - sex
+  #   - RIN
+  #   - skin site, when both sites are included
+  #
+  # ischemic_time, center, extraction_batch and
+  # sequencing_batch remain in the metadata but are not in
+  # the primary model unless later justified.
+  # ----------------------------------------------------------
+
+  col_data <- col_data %>%
+
+    filter(
+      !is.na(age_numeric),
+      !is.na(sex),
+      !is.na(rin)
+    )
+
+
+  # ----------------------------------------------------------
+  # Put metadata into exactly the same order as count columns
+  # ----------------------------------------------------------
+
+  col_data <- col_data %>%
+
+    arrange(
+      match(
+        sample_id,
+        colnames(counts)
+      )
+    )
+
+
+  # Subset counts to samples retained after covariate filtering
+  counts <- counts[
+    ,
+    col_data$sample_id,
+    drop = FALSE
+  ]
+
+
+  # ----------------------------------------------------------
+  # Keep useful metadata in the DESeq2 object
+  # ----------------------------------------------------------
+
+  col_data <- col_data %>%
+
+    select(
+      sample_id,
+      donor_id,
+      bulk_skin_site,
+      age_bin,
+      age_numeric,
+      sex,
+      rin,
+      center,
+      ischemic_time,
+      extraction_batch,
+      sequencing_batch,
+      total_counts,
+      detected_genes,
+      deseq2_size_factor
+    ) %>%
+
+    as.data.frame()
+
+
+  rownames(col_data) <- (
+    col_data$sample_id
+  )
+
+
+  # ----------------------------------------------------------
+  # Safety check
+  # ----------------------------------------------------------
+
+  stopifnot(
+    identical(
+      rownames(col_data),
+      colnames(counts)
+    )
+  )
+
+
+  # ----------------------------------------------------------
+  # Drop unused factor levels
+  # ----------------------------------------------------------
+
+  col_data$sex <- droplevels(
+    col_data$sex
+  )
+
+  col_data$bulk_skin_site <- droplevels(
+    col_data$bulk_skin_site
+  )
+
+
+  # ----------------------------------------------------------
+  # Define model
+  #
+  # AGE is deliberately the final term because it is our
+  # coefficient of interest.
+  # ----------------------------------------------------------
+
+  if (include_site) {
+
+    design_formula <- (
+      ~ bulk_skin_site +
+        sex +
+        rin +
+        age_numeric
+    )
+
+  } else {
+
+    design_formula <- (
+      ~ sex +
+        rin +
+        age_numeric
+    )
+  }
+
+
+  # ----------------------------------------------------------
+  # Create DESeqDataSet
+  # ----------------------------------------------------------
+
+  dds <- DESeqDataSetFromMatrix(
+    countData = counts,
+    colData = col_data,
+    design = design_formula
+  )
+
+
+  # ----------------------------------------------------------
+  # Standard DESeq2 median of ratios size factor estimation
+  # ----------------------------------------------------------
+
+  dds <- estimateSizeFactors(
+    dds
+  )
+
+
+  # ----------------------------------------------------------
+  # Fit the DESeq2 model now so downstream SSSP selection can
+  # simply readRDS() and extract the age coefficient.
+  # ----------------------------------------------------------
+
+  dds <- DESeq(
+    dds
+  )
+
+
+  return(dds)
+}
+
+
+# ============================================================
+# Define analysis groups
+#
+# These are the ONLY two analyses:
+#
+# 1. Suprapubic only
+# 2. Suprapubic + lower leg
+# ============================================================
+
+suprapubic_site <- (
+  "Skin - Not Sun Exposed (Suprapubic)"
+)
+
+lower_leg_site <- (
+  "Skin - Sun Exposed (Lower leg)"
+)
+
+
+# ============================================================
+# 1. Suprapubic-only model
+#
+# expression ~ sex + RIN + age
+# ============================================================
+
+message(
+  "Creating suprapubic-only DESeq2 object..."
+)
+
+dds_suprapubic <- make_age_deseq_object(
+
+  site_names = c(
+    suprapubic_site
+  ),
+
+  qc = qc,
+
+  gct_data = gct_data,
+
+  include_site = FALSE
+)
+
+
+message(
+  "Suprapubic design: ",
+  paste(
+    deparse(
+      design(dds_suprapubic)
+    ),
+    collapse = " "
+  )
+)
+
+
+message(
+  "Suprapubic result coefficients: ",
+  paste(
+    resultsNames(dds_suprapubic),
+    collapse = ", "
+  )
+)
+
+
+saveRDS(
+
+  dds_suprapubic,
+
+  file.path(
+    out_dir,
+    "gtex_skin_dds_age_suprapubic.rds"
+  )
+)
+
+
+# ============================================================
+# 2. Suprapubic + lower-leg model
+#
+# expression ~ site + sex + RIN + age
+# ============================================================
+
+message(
+  "Creating suprapubic + lower-leg DESeq2 object..."
+)
+
+dds_combined <- make_age_deseq_object(
+
+  site_names = c(
+    suprapubic_site,
+    lower_leg_site
+  ),
+
+  qc = qc,
+
+  gct_data = gct_data,
+
+  include_site = TRUE
+)
+
+
+message(
+  "Combined design: ",
+  paste(
+    deparse(
+      design(dds_combined)
+    ),
+    collapse = " "
+  )
+)
+
+
+message(
+  "Combined result coefficients: ",
+  paste(
+    resultsNames(dds_combined),
+    collapse = ", "
+  )
+)
+
+
+saveRDS(
+
+  dds_combined,
+
+  file.path(
+    out_dir,
+    "gtex_skin_dds_age_suprapubic_plus_lower_leg.rds"
+  )
+)
+
+
+# ============================================================
+# Optional: save age-effect result tables as a quick sanity
+# check. The fitted DDS objects remain the canonical output.
+# ============================================================
+
+res_age_suprapubic <- results(
+  dds_suprapubic,
+  name = "age_numeric"
+) %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("gene") %>%
+  arrange(
+    padj
+  )
+
+
+write_csv(
+
+  res_age_suprapubic,
+
+  file.path(
+    out_dir,
+    "gtex_skin_deseq2_age_results_suprapubic.csv"
+  )
+)
+
+
+res_age_combined <- results(
+  dds_combined,
+  name = "age_numeric"
+) %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("gene")%>%
+  arrange(
+    padj
+  )
+
+
+write_csv(
+
+  res_age_combined,
+
+  file.path(
+    out_dir,
+    "gtex_skin_deseq2_age_results_suprapubic_plus_lower_leg.csv"
+  )
+)
+
+
+# ============================================================
+# Save a summary of the reusable objects
+# ============================================================
+
+dds_summary <- tibble(
+
+  analysis = c(
+    "suprapubic_only",
+    "suprapubic_plus_lower_leg"
+  ),
+
+  file = c(
+    "gtex_skin_dds_age_suprapubic.rds",
+    "gtex_skin_dds_age_suprapubic_plus_lower_leg.rds"
+  ),
+
+  n_genes = c(
+    nrow(dds_suprapubic),
+    nrow(dds_combined)
+  ),
+
+  n_samples = c(
+    ncol(dds_suprapubic),
+    ncol(dds_combined)
+  ),
+
+  n_donors = c(
+    n_distinct(
+      colData(dds_suprapubic)$donor_id
+    ),
+    n_distinct(
+      colData(dds_combined)$donor_id
+    )
+  ),
+
+  design = c(
+    "~ sex + rin + age_numeric",
+    "~ bulk_skin_site + sex + rin + age_numeric"
+  )
+)
+
+
+write_csv(
+
+  dds_summary,
+
+  file.path(
+    out_dir,
+    "gtex_skin_deseq2_age_object_summary.csv"
+  )
+)
+
+
+kable(
+  dds_summary
+)
+
+
+# ============================================================
+# Save one consolidated reusable GTEx bulk-skin R object
+#
+# Counts and fitted model metadata are already contained in the DESeqDataSet
+# objects, so the original GCT matrices are not duplicated in this bundle.
+# ============================================================
+
+object_dir <- file.path(
+  project_root,
+  "data",
+  "public_validation"
+)
+
+dir.create(
+  object_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+gtex_bulk_skin <- list(
+  # Keep paths rather than embedding the two fitted objects again; the
+  # canonical RDS files are ~3.3 GB and ~7.0 GB, respectively.
+  dds_paths = list(
+    suprapubic = file.path(
+      out_dir,
+      "gtex_skin_dds_age_suprapubic.rds"
+    ),
+    suprapubic_plus_lower_leg = file.path(
+      out_dir,
+      "gtex_skin_dds_age_suprapubic_plus_lower_leg.rds"
+    )
+  ),
+  sample_qc = qc,
+  sample_qc_with_flags = qc_flags,
+  age_results_suprapubic = res_age_suprapubic,
+  age_results_suprapubic_plus_lower_leg = res_age_combined,
+  object_summary = dds_summary,
+  site_names = list(
+    suprapubic = suprapubic_site,
+    lower_leg = lower_leg_site
+  ),
+  input_files = list(
+    gct_files = gct_files,
+    subject_phenotypes = subject_pheno_path,
+    sample_attributes = sample_attr_path
+  ),
+  created_by = "code/public_validation/09_gtex_bulk_skin_qc.Rmd"
+)
+
+gtex_bulk_skin_object_path <- file.path(
+  object_dir,
+  "gtex_bulk_skin.rds"
+)
+
+saveRDS(
+  gtex_bulk_skin,
+  gtex_bulk_skin_object_path
+)
+
+message(
+  "Saved consolidated GTEx bulk-skin R object: ",
+  gtex_bulk_skin_object_path
+)
+```
+
+```{r}
+# ============================================================
+# Export processed VST matrices + matching metadata
+# for downstream Python SSSP selection
+# ============================================================
+
+export_vst_and_metadata <- function(dds, prefix, out_dir) {
+
+  # dds has already been fitted with DESeq()
+  vsd <- vst(
+    dds,
+    blind = FALSE
+  )
+
+  # Samples x genes
+  vst_df <- assay(vsd) %>%
+    t() %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column("sample_id")
+
+  write_csv(
+    vst_df,
+    file.path(
+      out_dir,
+      paste0(prefix, "_vst.csv.gz")
+    )
+  )
+
+
+  # Use metadata directly from the same DDS so there is no
+  # possibility of expression/metadata mismatch.
+  metadata_df <- colData(dds) %>%
+    as.data.frame() %>%
+    tibble::as_tibble()
+
+  write_csv(
+    metadata_df,
+    file.path(
+      out_dir,
+      paste0(prefix, "_metadata.csv")
+    )
+  )
+}
+
+
+export_vst_and_metadata(
+  dds_suprapubic,
+  "gtex_skin_age_suprapubic",
+  out_dir
+)
+
+export_vst_and_metadata(
+  dds_combined,
+  "gtex_skin_age_suprapubic_plus_lower_leg",
+  out_dir
+)
+```
+
+## Output Files
+
+```{r output-files}
+output_table <- tibble(
+  output = list.files(out_dir, full.names = FALSE),
+  path = file.path(out_dir, output)
+)
+
+kable(output_table)
+```

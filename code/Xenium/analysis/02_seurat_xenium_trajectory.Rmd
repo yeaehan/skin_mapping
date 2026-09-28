@@ -1,0 +1,65 @@
+---
+title: "2_Seurat_Xenium_Trajectory"
+output: html_document
+date: "2025-11-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align='center', fig.width=12, fig.height = 8)
+```
+
+```{r warning=FALSE, message=FALSE}
+
+devtools::install_github("satijalab/seurat", ref = "main")
+
+install.packages("spatstat")
+
+BiocManager::install(c('BiocGenerics', 'DelayedArray', 'DelayedMatrixStats',
+                       'limma', 'lme4', 'S4Vectors', 'SingleCellExperiment',
+                       'SummarizedExperiment', 'batchelor', 'HDF5Array',
+                       'ggrastr'))
+
+BiocManager::install("BiocGenerics")
+
+
+install.packages("devtools")
+remotes::install_github("bnprks/BPCells/r")
+
+devtools::install_github('cole-trapnell-lab/monocle3')
+
+library(monocle3)
+
+library(Seurat)
+library(tidyverse)
+library(dplyr)
+library(magrittr)
+library(ggplot2)
+library(patchwork)
+library(sctransform)
+library(cowplot)
+library(harmony)
+
+library(Seurat)
+library(sf)
+library(ggplot2)
+
+library(DoubletFinder)
+
+
+require(future)
+availableCores()
+plan("multisession", workers = 4)
+options(future.globals.maxSize = 8000 * 1024^2)
+```
+
+```{r}
+save.image("data/20251106_1.RData") #saved 11/21
+
+saveRDS(hsskin.ST, "data/skinST.RDS")
+
+load("data/20251106.RData")
+load("data/20251106_1.RData")
+
+
+
+```

@@ -1,0 +1,876 @@
+---
+title: "1_Seurat_Xenium_Preprocessing"
+output: html_document
+date: "2025-10-31"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align='center', fig.width=12, fig.height = 8)
+```
+
+```{r warning=FALSE, message=FALSE}
+install.packages('arrow')
+
+devtools::install_github("satijalab/seurat", ref = "main")
+
+
+library(Seurat)
+library(tidyverse)
+library(dplyr)
+library(magrittr)
+library(ggplot2)
+library(patchwork)
+library(sctransform)
+library(cowplot)
+library(harmony)
+
+library(Seurat)
+library(sf)
+library(ggplot2)
+
+library(DoubletFinder)
+
+
+require(future)
+availableCores()
+plan("multisession", workers = 4)
+options(future.globals.maxSize = 8000 * 1024^2)
+```
+
+```{r}
+save.image("data/20251106_1.RData") #saved 11/21 2/4
+
+load("data/20251106.RData")
+load("data/20251106_1.RData")
+
+
+samples <- list.files("//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data/xenium")
+clean_samples <- samples[!grepl("\\.zarr$", samples)]
+
+sm_folders <- (paste0("//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data/xenium/", clean_samples))
+
+stList <- list()
+
+for (i in seq_along(clean_samples)) {
+  print(i)
+  stList[[i]] <- LoadXenium(sm_folders[i],
+                         fov = "fov", segmentations="cell", flip.xy=TRUE)
+  stList[[i]]$sample <- clean_samples[i]
+  stList[[i]]$age <- ifelse(grepl("_Y", clean_samples[i]), "Young", "Old")
+}
+
+#Without any filtering, Check the spot numbers of each section
+lapply(stList, ncol) %>% unlist()
+
+tmp = stList[[1]]
+ImageFeaturePlot(tmp, features = "nCount_Xenium")
+
+
+
+```
+
+```{r}
+plots = list()
+for (i in seq_along(stList)) {
+    plots[[i]] = ImageFeaturePlot(stList[[i]], features = "nCount_Xenium")
+}
+wrap_plots(plots, ncol = 4)
+```
+
+```{r}
+# based on the histogram plot, here we choose 20 transcript counts as lower cutoff
+
+plots = list()
+
+for (i in seq_along(stList)) {
+    plots[[i]] = hist(stList[[i]]$nCount_Xenium, xlim=c(0,200), breaks = 5000)
+    abline(v = 10, col="red")
+}
+wrap_plots(plots, ncol = 3)
+
+for (i in seq_along(stList)) {
+    stList[[i]]<- subset(stList[[i]], subset = nCount_Xenium >= 10)
+}
+
+hsskin.ST <- merge(stList[[1]], 
+                    y = stList[2:length(stList)], 
+                    add.cell.ids = clean_samples, 
+                    project = "hsskin.ST")
+
+
+
+```
+
+
+
+
+## 2.5 Plotting after filtering
+```{r fig.height=12}
+VlnPlot(
+  hswound.ST,
+  features = c("nFeature_Spatial", "nCount_Spatial", "percent.mt", "percent.ribo", "percent.hb", "percent.malat1"),
+  ncol = 2, pt.size=0)
+```
+
+## 2.6 FeaturePlots after filtering
+```{r fig.height=8}
+samples <- unique(hswound.ST$Sample_name)
+for (i in samples) {
+    plot_list <- SpatialFeaturePlot(hswound.ST[, hswound.ST$Sample_name == i], images = i, features = c("nFeature_Spatial", "nCount_Spatial", "percent.mt", "percent.ribo", "percent.hb", "percent.malat1"), ncol = 3)
+    print(paste0("Ploting quality metrics of ", i))
+    print(plot_list)
+}
+```
+
+
+#######################################################
+# Step 3: Preliminary clustering (no batch-correction)
+#######################################################
+## 3.1 Run sctransform, pca, clustering, umap
+
+```{r fig.height=5, fig.width= 5}
+
+hsskin.ST <- FindNeighbors(hsskin.ST, reduction = "pca", dims = 1:20, k.param= 100)
+hsskin.ST <- RunUMAP(hsskin.ST, reduction = "pca", dims = 1:20, n.neighbors= 100, min.dist=0.5)
+hsskin.ST <- FindClusters(hsskin.ST, resolution = 0.5)
+
+DimPlot(hsskin.ST)
+```
+
+```{r}
+DimPlot(hsskin.ST, group.by = c("sample", "age")) #ran again after integration, but the dimplot before integration showed that samples hadn't been integrated very well and were separated
+```
+
+
+
+```{r}
+hsskin.ST <- IntegrateLayers(hsskin.ST, method = HarmonyIntegration,
+                             orig = "pca", new.reduction = "harmony",
+                             dims = 1:30)
+
+# UMAP analysis based on batch-corrected Harmony space
+# runtime: 1min
+hsskin.ST <- RunUMAP(hsskin.ST, reduction = "harmony", dims = 1:30,
+                    return.model = TRUE, verbose = FALSE, , n.neighbors=100)
+
+hsskin.ST <- FindNeighbors(hsskin.ST, reduction = "harmony", dims = 1:30,  k.param= 100)
+hsskin.ST <- FindClusters(hsskin.ST, resolution = 0.5, verbose = FALSE)
+
+DimPlot(hsskin.ST, group.by = c("sample", "age"))
+Idents(hsskin.ST) <- 'SCT_snn_res.0.5'
+
+DimPlot(hsskin.ST, label = TRUE, label.box = TRUE)
+
+```
+
+```{r}
+
+
+# UMAP analysis based on batch-corrected Harmony space
+# runtime: 1min
+hsskin.ST <- RunUMAP(hsskin.ST, reduction = "harmony", dims = 1:30,
+                    return.model = TRUE, verbose = FALSE, , n.neighbors=100)
+
+hsskin.ST <- FindNeighbors(hsskin.ST, reduction = "harmony", graph.name = 'cells',dims = 1:30,  k.param= 100)
+hsskin.ST <- FindClusters(hsskin.ST, resolution = 0.7,graph.name = 'cells', verbose = FALSE)
+
+
+Idents(hsskin.ST) <- 'SCT_snn_res.0.7'
+DimPlot(hsskin.ST, group.by = "SCT_snn_res.0.7", label = TRUE)
+
+all.markers <- FindAllMarkers(hsskin.ST, only.pos = FALSE, group.by='SCT_snn_res.0.7')
+
+# Save the 'all.markers' data frame to a file named "all_markers.csv"
+write.csv(all.markers, file = "results/all_markers_0.7_negpos.csv", row.names = FALSE)
+
+```
+
+
+```{r}
+prep_FindMarkers <- function(obj, num_slices = 6) {
+  # Loop through total number slices
+  for (i in 1:num_slices) {
+    slot(object = obj@assays$SCT@SCTModel.list[[i]], name = "umi.assay") <- "Xenium"
+  }
+  obj <- obj %>% PrepSCTFindMarkers()
+  # Return the modified obj
+  return(obj)}
+
+hsskin.ST<- prep_FindMarkers(hsskin.ST)
+
+# calculate marker genes for each cluster
+all.markers <- FindAllMarkers(hsskin.ST, only.pos = TRUE)
+
+# Save the 'all.markers' data frame to a file named "all_markers.csv"
+write.csv(all.markers, file = "results/all_markers.csv", row.names = FALSE)
+
+top10 <- all.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_log2FC)
+a=DoHeatmap(hsskin.ST, features = top10$gene, slot='data')
+
+a <- DoHeatmap(hsskin.ST, features = unique(top10$gene))
+ggsave("heatmap.png", plot = a, width = 20, height = 20, dpi = 100)
+
+DotPlot(hsskin.ST, features = unique(top10$gene), cols = c("blue", "red"), dot.scale = 2) +
+  
+  # 2. Improve Readability (optional but recommended)
+  # Transpose the plot for better gene label viewing
+  RotatedAxis() +
+  
+  # 3. Add a Title (optional)
+  labs(title = "Top 10 Markers per Cluster")
+
+```
+
+
+```{r}
+cc <- scale_color_gradientn(colors = c("grey", "yellow", "red", "black"))
+small.leg <- theme(legend.text = element_text(size = 6), legend.key.width = unit(0.1, "cm"))
+
+canonical_markers <- list(
+  'Keratinocytes' = c('KRT5', 'KRT14', 'KRT1', 'KRT10'),
+  'Fibroblasts' = c('COL1A1', 'DCN'),
+  'Melanocyte' = c('MLANA'),
+  'Endothelial-cells' = c('VWF', 'SOX17'),
+  'Immune cells' = c('CD34'),
+  'T-cells' = c('CD3D'),
+  'Dendritic-cells' = c('CD74')
+)
+
+
+canonical_markers <- list(
+  'Keratinocytes' = c('KRT5', 'KRT14', 'KRT10'), 
+  'Fibroblasts' = c('COL1A1', 'COL1A2', 'LUM'), 
+  'Melanocytes' =	c('PMEL',	'MLANA', 'TYRP1'), 
+  'Endothelial-cells' = c('PECAM1', 'VWF', 'EGFL7'), 
+  'Myeloid-cells' = c('LYZ', 'HLA-DRA', 'HLA-DRB1'), 
+  'Mono-mac' = c('CD68', 'CD163', 'CD14'), #In dermis  
+  'Macrophages' = c('CD209', 'FCGR2A', 'MRC1'), #CD209, FCGR2A aka CD32 or FCGR1A aka CD64, 
+  #MRC1 aka CD206 (markers of macrophages, immature dendritic cells)
+  'T-cells' = c('CD7', 'CD3D', 'CD3E'), 
+  'T-cells2' = c('CD4', 'CD8A', 'NKG7'), 
+  'B-cells' = c('MS4A1', 'CD79A', 'CD19'), 
+  'Plasma-cells' = c('JCHAIN', 'IGHG1', 'MZB1'), 
+  'LC-cells' = c('CD207', 'CD1A'), #Primarily located in epidermis (CD1A aka CD1)  
+  'Dendritic-cells' = c('CD1C', 'CD1B', 'ITGAX'), #immature DC primarily located in superior dermis (ITGAX aka CD11C)
+  'Dendritic-cells2' = c('CD83', 'LAMP3', 'THBD'), #mature DC: LAMP3 aka CD208, THBD aka CD141
+  'Dendritic-cells3' = c('CLEC9A'), #CLEC9A aka DNGR1, a Dendritic Cell-Specific Sensor 
+  'Schwann' = c('SOX10', 'SOX2'), 
+  'PC-vSMC' = c('ACTA2', 'MCAM'), 
+  'Epithelial_Mesenchymal' = c('EPCAM', 'PDGFRB')
+)
+plot_list <- FeaturePlot(
+  hsskin.ST,
+  features=unlist(canonical_markers),
+  combine=FALSE
+)
+
+
+# apply theme to each feature plot
+for(i in 1:length(plot_list)){
+  plot_list[[i]] <- plot_list[[i]] + NoAxes() + cc + small.leg
+}
+
+p_keratinocytes <- cowplot::plot_grid(plotlist = plot_list[1:4], ncol = 3) + 
+  draw_figure_label(label = "Keratinocytes", size = 8, fontface = "bold", position = "top.right")
+
+p_fibroblasts <- cowplot::plot_grid(plotlist = plot_list[5:6], ncol = 3) + 
+  draw_figure_label(label = "Fibroblasts", size = 8, fontface = "bold", position = "top.right")
+
+p_melanocyte <- cowplot::plot_grid(plotlist = plot_list[7], ncol = 3) + 
+  draw_figure_label(label = "Melanocyte", size = 8, fontface = "bold", position = "top.right")
+
+p_endothelial <- cowplot::plot_grid(plotlist = plot_list[8:9], ncol = 3) + 
+  draw_figure_label(label = "Endothelial-cells", size = 8, fontface = "bold", position = "top.right")
+
+p_immune <- cowplot::plot_grid(plotlist = plot_list[10], ncol = 3) + 
+  draw_figure_label(label = "Immune cells", size = 8, fontface = "bold", position = "top.right")
+
+p_tcells <- cowplot::plot_grid(plotlist = plot_list[11], ncol = 3) + 
+  draw_figure_label(label = "T-cells", size = 8, fontface = "bold", position = "top.right")
+
+p_dendritic <- cowplot::plot_grid(plotlist = plot_list[12], ncol = 3) + 
+  draw_figure_label(label = "Dendritic-cells", size = 8, fontface = "bold", position = "top.right")
+
+library(patchwork)
+
+final_plot <- cowplot::plot_grid(
+  p_keratinocytes,
+  p_fibroblasts,
+  p_melanocyte,
+  p_endothelial,
+  p_immune,
+  p_tcells,
+  p_dendritic,
+  ncol = 2  # <-- Change this to 2 or 3
+)
+
+print(final_plot)
+```
+
+```{r}
+
+cluster_to_celltype_map <- c(
+    "0" = "Basal/Suprabasal Keratinocyte",
+    "1" = "Fibroblast",
+    "2" = "Differentiated Keratinocyte",
+    "3" = "Endothelial Cell",
+    "4" = "T Cell",
+    "5" = "Keratinocyte/Sebocyte",
+    "6" = "Epithelial/Progenitor Cell",
+    "7" = "Epithelial Cell/Fibroblast",
+    "8" = "Dendritic Cell / cDC2",
+    "9" = "Plasma Cell",
+    "10" = "T-Cell/Myeloid Hybrid or Macrophage",
+    "11" = "Melanocyte",
+    "12" = "Epithelial Cell (Progenitor/Tumor-like)",
+    "13" = "Langerhans Cell",
+    "14" = "Smooth Muscle Cell",
+    "15" = "Proliferating Cell",
+    "16" = "Mast Cell",
+    "17" = "Stromal/Endothelial/Lymphatic-related"
+)
+
+# 2. **ADD THE NEW METADATA COLUMN**
+# This line looks up the value in the 'SNN_cluster_0.7' column for every cell,
+# finds the matching name in the map, and assigns the new cell type string 
+# to a brand-new column called 'cell_type_annotated'.
+hsskin.ST@meta.data$cell_type_minor <- cluster_to_celltype_map[
+    as.character(hsskin.ST@meta.data$SCT_snn_res.0.7)
+]
+
+cluster_to_celltype_map2 <- c(
+    "0" = "Keratinocyte",
+    "1" = "Fibroblast",
+    "2" = "Keratinocyte",
+    "3" = "Endothelial Cell",
+    "4" = "T-Cell",
+    "5" = "Keratinocyte",
+    "6" = "Epithelial Cell",
+    "7" = "Epithelial Cell",
+    "8" = "Dendritic Cell",
+    "9" = "Plasma Cell",
+    "10" = "T-Cell",
+    "11" = "Melanocyte",
+    "12" = "Epithelial Cell",
+    "13" = "Langerhans Cell",
+    "14" = "Smooth Muscle Cell",
+    "15" = "Proliferating Cell",
+    "16" = "Mast Cell",
+    "17" = "Stromal/Endothelial/Lymphatic-related"
+)
+
+hsskin.ST@meta.data$cell_type_major <- cluster_to_celltype_map2[
+    as.character(hsskin.ST@meta.data$SCT_snn_res.0.7)
+]
+
+```
+
+```{r fig.height=10, fig.width= 10}
+Idents(hsskin.ST) <- 'SCT_snn_res.0.7'
+
+p1 = ImageDimPlot(hsskin.ST, fov = "fov.2", size = 1,cols = "parade", alpha = 1, nmols = 50000,crop = TRUE,  dark.background = FALSE)
+
+p2 = ImageDimPlot(hsskin.ST, fov = "fov.3", size = 1,cols = "parade", alpha = 1, nmols = 30000,dark.background = FALSE,crop = TRUE,  mols.size = 0.9)
+
+p1 + p2
+
+p2
+
+```
+
+```{r}
+Idents(hsskin.ST) <- 'cell_type_major'
+
+p1 = ImageDimPlot(hsskin.ST, fov = "fov", size = 1,alpha = 2, nmols = 50000,crop = TRUE,  dark.background = FALSE)
+
+p2 = ImageDimPlot(hsskin.ST, fov = "fov.2", size = 1,alpha = 2, nmols = 50000,crop = TRUE,  dark.background = FALSE)
+
+p3 = ImageDimPlot(hsskin.ST, fov = "fov.3", size = 1,alpha = 2, nmols = 50000,dark.background = FALSE,crop = TRUE,  mols.size = 0.9)
+
+p4 = ImageDimPlot(hsskin.ST, fov = "fov.5", size = 1,alpha = 2, nmols = 50000,dark.background = FALSE,crop = TRUE,  mols.size = 0.9)
+
+p1 + p2 + p3 + p4
+
+
+```
+
+```{r}
+options(repr.plot.width=8, repr.plot.height=10)
+
+Idents(hsskin.ST) <- 'cell_type_minor'
+
+p1 = ImageDimPlot(hsskin.ST, fov = "fov.2", size = 1,alpha = 2, nmols = 50000,crop = TRUE,  dark.background = FALSE)
+
+p2 = ImageDimPlot(hsskin.ST, fov = "fov.5", size = 2,alpha = 2, nmols = 50000,dark.background = FALSE,crop = TRUE,  mols.size = 0.9)
+
+p1 + p2
+p2
+
+```
+
+```{r}
+
+Idents(hsskin.ST) <- 'cell_type_major'
+
+p2 = ImageDimPlot(hsskin.ST, fov = "fov.5", size = 2, cols = 'red', dark.background = FALSE,crop = TRUE, cells = WhichCells(hsskin.ST, idents = "Keratinocyte"))
+   
+p3 = ImageDimPlot(hsskin.ST, fov = "fov.5", size = 2, cols = 'red', dark.background = FALSE,crop = TRUE, cells = WhichCells(hsskin.ST, idents = "T-Cell"))
+                  
+p4 = ImageDimPlot(hsskin.ST, fov = "fov.5", size = 2, cols = 'red', dark.background = FALSE,crop = TRUE, cells = WhichCells(hsskin.ST, idents = "Proliferating Cell"))
+                  
+p2 + p3 + p4
+
+
+```
+
+```{r}
+
+p1 <- ImageFeaturePlot(hsskin.ST, fov = "fov.5", features = "CDKN2A", dark.background = FALSE,crop = TRUE)
+p2 <- ImageFeaturePlot(hsskin.ST, fov = "fov.5", features = "CDKN1A", dark.background = FALSE,crop = TRUE)
+
+p3 <- ImageDimPlot(hsskin.ST, fov = "fov.5", molecules = "CDKN1A", dark.background = FALSE,crop = TRUE, mols.cols = "red")
+ImageDimPlot(xenium.obj, fov = "fov", molecules = c("Gad1", "Sst", "Pvalb", "Gfap"), nmols = 20000)
+
+Default
+
+# p1 = ImageDimPlot(hsskin.ST, fov = "fov.5", size = 2, cols = 'red', dark.background = FALSE,crop = TRUE, molecules = "CDKN2A", nmols = 10000, alpha = 0.3)
+# 
+# p2 = ImageDimPlot(hsskin.ST, fov = "fov.5", size = 2, cols = 'red', dark.background = FALSE,crop = TRUE, molecules = "CDKN1A", nmols = 10000, alpha = 0.3)
+
+p1 + p2 + p3
+
+```
+
+
+```{r fig.height=10, fig.width= 10}
+Idents(hsskin.ST) <- 'SCT_snn_res.0.7'
+
+# You can change "repr.plot.height" below to change plot height
+options(repr.plot.width=10, repr.plot.height=16)
+
+p1 = ImageFeaturePlot(hsskin.ST, fov = "fov.2",
+                 features = c("CDKN2A", "CDKN1A"),
+                 max.cutoff="q95")
+
+p2 = ImageFeaturePlot(hsskin.ST, fov = "fov.3",
+                 features = c("CDKN2A", "CDKN1A"),
+                 max.cutoff="q95")
+ 
+p1 + p2
+
+p2
+
+```
+
+
+```{r}
+Idents(hsskin.ST) <- 'cell_type_major'
+
+DimPlot(hsskin.ST, reduction = "umap", label = TRUE, label.size = 3)
+```
+
+
+
+```{r subclustering}
+Idents(hsskin.ST) <- 'cell_type_minor'
+
+hsskin.ST <- FindSubCluster(hsskin.ST, "Proliferating Cell", "cells", subcluster.name = "prolif",  resolution = 0.5)
+DimPlot(hsskin.ST, reduction = "umap", group.by = "prolif", label = TRUE, label.size = 6)
+
+```
+
+
+
+```{r}
+# would it be useful to do niche analysis ... ?
+
+hsskin.ST <- BuildNicheAssay(object = hsskin.ST, fov = "fov", group.by = "cell_type_minor",
+    niches.k = 5, neighbors.k = 30)
+```
+
+
+```{r}
+
+hsskin.ST$age <- factor(hsskin.ST$age, levels = c("Young", "Old"))
+
+
+immsen3 <- as.data.frame(table(hsskin.ST$age, hsskin.ST$cell_type_major))
+
+cells <- as.data.frame(immsen3 %>%
+                           group_by(Var1) %>%
+                           mutate(Freq = Freq / sum(Freq)))
+# cells <- cells[cells$Var2 != 'none',]
+# cells <- cells[cells$Var2 != 'CD45+',]
+
+cells <- cells %>%
+  group_by(Var1) %>%
+  mutate(Percentage = round(Freq * 100, 1))  # Convert proportion to percentage
+
+library(ggplot2)
+stacked_barplot <- ggplot(cells, aes(x = Var1, y = Freq, fill = Var2)) +
+  geom_bar(stat = "identity", position = "stack") +
+  theme_minimal() +
+  labs(
+    title = "Proportion of  Cell Types in Young vs. Old",
+    x = "Age Group",
+    y = "Proportion",
+    fill = "Cell Types"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 12)
+  )
+
+stacked_barplot <- ggplot(cells, aes(x = Var1, y = Freq, fill = Var2)) +
+  geom_bar(stat = "identity", position = "stack", color = "black") +  # Black borders
+  geom_text(aes(label = paste0(Percentage, "%")),
+            position = position_stack(vjust = 0.5),
+            size = 2, color = "black") +  # Percentage labels inside bars
+  theme_minimal() +
+  labs(
+    title = "Proportion of Cell Types in Young vs. Old",
+    x = "Age Group",
+    y = "Proportion",
+    fill = "Cell Types"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 12)
+  )
+
+# Display the plot
+print(stacked_barplot)
+```
+
+```{r}
+
+hsskin.ST$sample <- factor(hsskin.ST$sample, levels = c("1738-Y", "7503-Y","1883-Y", "4891-O","5138-O", "4890-O"))
+
+immsen3 <- as.data.frame(table(hsskin.ST$sample, hsskin.ST$cell_type_major))
+
+cells <- as.data.frame(immsen3 %>%
+                           group_by(Var1) %>%
+                           mutate(Freq = Freq / sum(Freq)))
+# cells <- cells[cells$Var2 != 'none',]
+# cells <- cells[cells$Var2 != 'CD45+',]
+
+cells <- cells %>%
+  group_by(Var1) %>%
+  mutate(Percentage = round(Freq * 100, 1))  # Convert proportion to percentage
+
+library(ggplot2)
+stacked_barplot <- ggplot(cells, aes(x = Var1, y = Freq, fill = Var2)) +
+  geom_bar(stat = "identity", position = "stack") +
+  theme_minimal() +
+  labs(
+    title = "Proportion of  Cell Types in Samples",
+    x = "Sample_ID",
+    y = "Proportion",
+    fill = "Cell Types"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 12)
+  )
+
+stacked_barplot <- ggplot(cells, aes(x = Var1, y = Freq, fill = Var2)) +
+  geom_bar(stat = "identity", position = "stack", color = "black") +  # Black borders
+  geom_text(aes(label = paste0(Percentage, "%")),
+            position = position_stack(vjust = 0.5),
+            size = 2, color = "black") +  # Percentage labels inside bars
+  theme_minimal() +
+  labs(
+    title = "Proportion of Cell Types in Samples",
+    x = "Sample_ID",
+    y = "Proportion",
+    fill = "Cell Types"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 12)
+  )
+
+# Display the plot
+print(stacked_barplot)
+```
+
+```{r}
+library(dplyr)
+
+# 1. Define the groups based on your specific cell types
+immune_list <- c("Dendritic Cell", "Langerhans Cell", "Mast Cell", "Plasma Cell", "T-Cell")
+
+skin_list <- c("Keratinocyte", "Fibroblast", "Melanocyte", "Epithelial Cell", 
+               "Endothelial Cell", "Smooth Muscle Cell", "Stromal/Endothelial/Lymphatic-related")
+
+# 2. Add the category to your Xenium object metadata
+hsskin.ST@meta.data <- hsskin.ST@meta.data %>%
+  mutate(cell_lineage = case_when(
+    cell_type_major %in% immune_list ~ "Immune Cells",
+    cell_type_major %in% skin_list   ~ "Skin Cells",
+    TRUE ~ "Other" # For Proliferating Cells or unassigned
+  ))
+
+
+get_cells_df <- function(obj, lineage) {
+  # 1. Extract metadata only to bypass FOV errors
+  meta_df <- obj@meta.data
+  
+  # 2. Filter metadata and calculate frequencies
+  # Note: Using 'Sample_ID' based on your previous plots
+  df <- meta_df %>%
+    filter(cell_lineage == lineage) %>%
+    group_by(age, cell_type_major) %>%
+    tally(name = "Freq") %>%
+    # 3. Calculate Proportion and Percentage per Sample
+    group_by(age) %>%
+    mutate(
+      Total = sum(Freq),
+      Proportion = Freq / Total,
+      Percentage = round(Proportion * 100, 1)
+    ) %>%
+    ungroup() %>%
+    # 4. Rename to match your ggplot 'Var1' and 'Var2' names
+    rename(Var1 = age, Var2 = cell_type_major)
+  
+  return(as.data.frame(df))
+}
+
+# Create the two dataframes
+cells_immune <- get_cells_df(hsskin.ST, "Immune Cells")
+cells_skin <- get_cells_df(hsskin.ST, "Skin Cells")
+
+#### Immune Cells
+ggplot(cells_immune, aes(x = Var1, y = Proportion, fill = Var2)) +
+  geom_bar(stat = "identity", position = "stack", color = "black") + 
+  geom_text(aes(label = paste0(Percentage, "%")),
+            position = position_stack(vjust = 0.5),
+            size = 2, color = "black") +
+  theme_minimal() +
+  labs(
+    title = "Proportion of Immune Cell Types",
+    x = "Sample_ID",
+    y = "Proportion",
+    fill = "Immune Cell Types"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 12)
+  )
+
+
+#### Skin Cells
+ggplot(cells_skin, aes(x = Var1, y = Proportion, fill = Var2)) +
+  geom_bar(stat = "identity", position = "stack", color = "black") + 
+  geom_text(aes(label = paste0(Percentage, "%")),
+            position = position_stack(vjust = 0.5),
+            size = 2, color = "black") +
+  theme_minimal() +
+  labs(
+    title = "Proportion of Skin Cell Types",
+    x = "Sample_ID",
+    y = "Proportion",
+    fill = "Skin Cell Types"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 12)
+  )
+
+
+
+
+
+```
+
+
+
+
+
+
+```{r}
+# Explicit marker list for R DotPlot
+# Shortened marker list for R DotPlot to prevent cutoff
+marker_list <- list(
+  "Basal_K"   = c("KRT15", "KRT5", "KRT14", "APCDD1"),
+  "Sup_Gra_K" = c("KRT1", "KRT10", "FLG", "KLK5", "TMEM45A", "DEFB1", "FABP5"),
+  "Melano"    = c("MLANA", "DCT", "TFAP2B", "TYR"),
+  "Fibro"     = c("LGR5", "COL1A1", "COL6A1", "COL6A2", "COL6A3", "GEM"),
+  "Endo"      = c("VWF", "CD34", "SOX17", "GYPC"),
+  "SM_Peri"   = c("ACTA2", "MYH11", "LGR6"),
+  "Lang" = c("CD207", "CD1A"),
+  "Eccrine"   = c("DCD"),
+  "Hair"      = c("WNT2B"),
+  "Immune" = c("PTPRC")
+)
+
+# --- Recommended Plotting Code for Visibility ---
+library(Seurat)
+library(ggplot2)
+
+Idents(hsskin.ST) <- 'cell_type_major'
+
+DotPlot(hsskin.ST, features = marker_list) + 
+  # 1. Flip the plot so cell types are on the Y-axis and genes on X
+  #coord_flip() + 
+  # 2. Rotate gene names 45 degrees
+  RotatedAxis() +
+  # 3. Fine-tune text size and plot margins
+  theme(
+    axis.text.y = element_text(size = 10),      # Size of the "Basal_K" labels
+    axis.text.x = element_text(size = 10),       # Size of the Gene labels
+    strip.text.x = element_text(size = 6), 
+    # Optional: reduce the angle or adjust spacing if they still overlap
+    strip.background = element_blank(),
+    plot.margin = margin(10, 10, 10, 10)        # Adds extra space around the plot
+  )
+
+```
+
+
+
+
+
+```{r immune_subclustering}
+# Create the 'immune_cell' metadata column
+hsskin.ST@meta.data$immune_cell <- ifelse(
+  hsskin.ST@meta.data$cell_type_major %in% c("T-Cell", "Mast Cell", "Dendritic Cell"),
+  "immune cell", 
+  "non-immune cell"
+)
+
+hsskin.ST <- UpdateSeuratObject(hsskin.ST) #updating because there was an issue with subsetting
+hsskin.immune <- subset(hsskin.ST, subset = immune_cell == "immune cell")
+
+saveRDS(hsskin.immune, file = "hsskin.immune.rds")
+saveRDS(hsskin.ST, file = "skin_mapping/data/hsskin.ST.rds")
+
+# Optional: Check the distribution to verify
+table(hsskin.ST@meta.data$cell_type_major, hsskin.ST@meta.data$immune_cell)
+
+Idents(hsskin.ST) <- 'immune_cell'
+
+hsskin.ST <- FindSubCluster(hsskin.ST, cluster="immune cell", graph.name="SCT_snn", subcluster.name="immune_subclusters",  resolution = 0.5)
+DimPlot(hsskin.ST, reduction = "umap", group.by = "prolif", label = TRUE, label.size = 6)
+
+marker_immune <- list(
+  "CD14+"   = c("CD14"), #monocyte
+  "CD68+" = c("CD68"),
+  "CD4+ CXCR3+/FOXP3+" = c("CD3E", "CD4", "TBX21", "CXCR3", "FOXP3"), #Th1 / Treg
+  "CD8+" = c("CD8A"),
+  "CD45+" = c("PTPRC")
+)
+
+Idents(hsskin.ST) <- 'immune_subclusters'
+
+DotPlot(hsskin.ST, features = marker_immune) + 
+  # 1. Flip the plot so cell types are on the Y-axis and genes on X
+  #coord_flip() + 
+  # 2. Rotate gene names 45 degrees
+  RotatedAxis() +
+  # 3. Fine-tune text size and plot margins
+  theme(
+    axis.text.y = element_text(size = 10),      # Size of the "Basal_K" labels
+    axis.text.x = element_text(size = 10),       # Size of the Gene labels
+    strip.text.x = element_text(size = 6), 
+    # Optional: reduce the angle or adjust spacing if they still overlap
+    strip.background = element_blank(),
+    plot.margin = margin(10, 10, 10, 10)        # Adds extra space around the plot
+  )
+
+#seems like immune cell_3 consists of both Th1+ and CD8+ cells 
+#immune cell_2 consists of CD14+ (monocytes) and CD68+ (myeloid-macrophages)
+
+DimPlot(hsskin.ST, reduction = "umap", group.by = "immune_subclusters", label = TRUE, label.size = 3)
+
+
+```
+
+```{r immune_renaming}
+
+cluster_to_immunetype_map <- c(
+    "immune cell_0" = "CD4+ FOXP3+", #Treg
+    "immune cell_1" = "none",
+    "immune cell_2" = "CD68+/CD14+",
+    "immune cell_3" = "CD8+",
+    "immune cell_4" = "CD4+",
+    "immune cell_5" = "CD4+",
+    "immune cell_6" = "CD4+",
+    "non-immune cell" = "none"
+)
+
+hsskin.ST@meta.data$immune_subclusters1 <- cluster_to_immunetype_map[
+    as.character(hsskin.ST@meta.data$immune_subclusters)
+]
+
+DimPlot(hsskin.ST, reduction = "umap", group.by = "immune_subclusters1", label = TRUE, label.size = 3)
+
+```
+
+
+```{r}
+Xen_data <- readRDS("Xenium_data_clustered_annotated.rds")
+as.AnnData(Xen_data, assay = "Xenium", file = "Xen_adata_annotated.h5ad")
+
+library(reticulate)
+use_condaenv("scverse", required = T)
+
+
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import scanpy as sc
+import squidpy as sq
+sc.logging.print_header()
+
+adata = sc.read_h5ad("Xen_adata_annotated.h5ad")
+adata.layers["counts"] = adata.X.copy()
+sc.pp.normalize_total(adata, inplace=True)
+sc.pp.log1p(adata)
+
+fig, ax = plt.subplots(1, 2, figsize=(10, 7))
+sq.pl.spatial_scatter(adata, library_key = "library_id", library_id = "Assay1", 
+                      color=["CellType"], shape=None, size=1, img = False, ax=ax[0])
+sq.pl.spatial_scatter(adata, library_key = "library_id", library_id = "Assay3", 
+                      color=["CellType"], shape=None, size=1, img = False, ax=ax[1])
+plt.show(ax)
+
+sq.gr.nhood_enrichment(adata, cluster_key="CellType")
+fig, ax = plt.subplots(1, 2, figsize=(13, 7))
+sq.pl.nhood_enrichment(adata, cluster_key="CellType", figsize=(8, 8), 
+                       title="Neighborhood enrichment adata", ax=ax[0])
+sq.pl.spatial_scatter(adata, color="CellType", library_key = "library_id", 
+                      library_id = "Assay1", shape=None, size=2, ax=ax[1])
+plt.show(ax)
+
+```
+
+
+
+
+
+# Sessioninfo
+
+```{r}
+sessionInfo()
+```

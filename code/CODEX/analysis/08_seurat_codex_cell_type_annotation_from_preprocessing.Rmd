@@ -1,0 +1,75 @@
+---
+title: "1_Seurat_CellTypeAnnotation_CODEX"
+output: html_document
+date: "2025-10-31"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align='center', fig.width=12, fig.height = 8)
+```
+
+```{r warning=FALSE, message=FALSE}
+install.packages("UpSetR")
+
+library(Seurat)
+library(tidyverse)
+library(magrittr)
+library(ggplot2)
+library(patchwork)
+library(sctransform)
+library(cowplot)
+library(harmony)
+```
+
+#####
+#Step 1: Load the Seurat object 
+#####
+
+```{r eval=FALSE, warning=FALSE, message=FALSE}
+setwd('//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data')
+codex <- readRDS(here("data", "codex.rds"))
+codex <- readRDS("data/codex.rds")
+
+# Check if your lineage markers are overlapping
+# This creates a "truth table" to see if your markers are mutually exclusive
+library(UpSetR)
+
+#y4614 doesn't have Pan-Cytokeratin
+pc <- seurat_old@assays$RNA$counts["Pan-Cytokeratin",] > 0.0
+sma <- seurat_old@assays$RNA$counts["SMA",] > 0.0
+melanA <- seurat_old@assays$RNA$counts["MelanA",] > 0.0
+vimentin <- seurat_old@assays$RNA$counts["Vimentin",] > 0.0
+k5 <- seurat_old@assays$RNA$counts["Keratin 5",] > 0.0
+fil <- seurat_old@assays$RNA$counts["Filaggrin",] > 0.0
+
+
+#pc <- codex@assays$RNA$counts["Pan-Cytokeratin",] > 0.0
+sma <- codex@assays$RNA$counts["SMA",] > 0.0
+melanA <- codex@assays$RNA$counts["MelanA",] > 0.0
+vimentin <- codex@assays$RNA$counts["Vimentin",] > 0.0
+k5 <- codex@assays$RNA$counts["Keratin 5",] > 0.0
+fil <- codex@assays$RNA$counts["Filaggrin",] > 0.0
+CD45 <- codex@assays$RNA$counts["CD45",] > 0.0
+
+lineage_matrix <- as.data.frame(cbind(fil, melanA, k5, sma, vimentin))
+upset(lineage_matrix * 1) # Multiplying by 1 converts TRUE/FALSE to 1/0
+
+setwd("..")
+```
+
+## Including Plots
+
+
+```{r, echo=FALSE}
+
+codex1 <-codex
+
+codex1 <- RunUMAP(codex1, reduction = "pca", dims=1:10, n.neighbors = 50, min.dist=0.3, spread=1)
+
+
+Idents(codex1) <- 'skincelltype'
+
+DimPlot(codex1, reduction = 'umap')
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

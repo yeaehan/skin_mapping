@@ -1,0 +1,249 @@
+---
+title: "2_Seurat_Xenium_Analysis"
+output: html_document
+date: "2025-12-03"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Gene Sets
+```{r}
+sasp <- c(
+  "CCL11", "CCL13", "CCL14", "CCL15", "CCL16", "CCL19", "CCL2", "CCL20", 
+  "CCL21", "CCL26", "CCL28", "CCL3", "CCL3L1", "CCL4", "CCL5", "CCL7", 
+  "CCL8", "CXCL1", "CXCL10", "CXCL11", "CXCL12", "CXCL13", "CXCL14", 
+  "CXCL16", "CXCL2", "CXCL3", "CXCL5", "CXCL6", "CXCL9", "IL12B", 
+  "IL13", "IL15", "IL18", "IL1A", "IL1B", "IL2", "IL23A", "IL4", "IL5", 
+  "IL6", "MMP12", "MMP9", "MMP3", "VEGFA", "TNF", "TGFB1", "CSF1", "EGF", 
+  "FGF2", "IFNB1", "CMKLR1"
+)
+
+```
+
+
+```{r}
+
+mmp <- grep("^MMP", rownames(hsskin.ST), value= TRUE)
+
+DefaultAssay(hsskin.ST) <- 'SCT'
+Idents(hsskin.ST) <- 'age'
+VlnPlot(object = hsskin.ST, features = mmp, split.by = 'age', layer="data")
+
+DotPlot(
+    object = hsskin.ST, 
+    features = c("MMP3", "MMP12", "MMP9"),
+    cols = c("blue", "red"), # Set color scale
+    dot.scale = 8 # Adjust dot size
+) + 
+  RotatedAxis()
+
+mmp_list <- list(MMP_Module = c("MMP3", "MMP12", "MMP9"))
+
+# Calculate the score
+hsskin.ST <- AddModuleScore(
+  object = hsskin.ST,
+  features = mmp_list,
+  name = "MMP_Score", # This will create a column named 'MMP_Score1'
+  ctrl = 10 #needed because there aren't enough genes in the same expresison bin
+)
+
+# Visualize the combined score by Age
+VlnPlot(hsskin.ST, features = "MMP_Score1", group.by = "age")
+Idents(hsskin.ST) <- 'age'
+ImageFeaturePlot(hsskin.ST, features = "MMP_Score1", fov = "fov.5")
+ImageFeaturePlot(hsskin.ST, features = "MMP_Score1", fov = "fov.2")
+
+
+Idents(hsskin.ST) <- 'age_celltype'
+
+hsskin.ST$age_celltype <- paste(hsskin.ST$age, hsskin.ST$cell_type_major, sep = "_")
+
+DotPlot(
+    object = hsskin.ST, 
+    group.by = "cell_type_major",
+    split.by = "age",
+    features = c("MMP3", "MMP12", "MMP9"),
+    cols = c("blue", "red"), # Set color scale
+    dot.scale = 8 # Adjust dot size
+) + 
+  RotatedAxis()
+
+p <- ImageDimPlot(hsskin.ST, fov = "fov.5", cols = c("red","#31476e", "#add8e6"), axes = FALSE, dark.background = FALSE,   size = 1.5, crop= TRUE)
+
+```
+
+## SnC Calculation in Xenium
+
+```{r}
+
+gene_list <- c(
+  "CCL11", "CCL13", "CCL14", "CCL15", "CCL16", "CCL19", "CCL2", "CCL20", 
+  "CCL21", "CCL26", "CCL28", "CCL3", "CCL3L1", "CCL4", "CCL5", "CCL7", 
+  "CCL8", "CXCL1", "CXCL10", "CXCL11", "CXCL12", "CXCL13", "CXCL14", 
+  "CXCL16", "CXCL2", "CXCL3", "CXCL5", "CXCL6", "CXCL9", "IL12B", 
+  "IL13", "IL15", "IL18", "IL1A", "IL1B", "IL2", "IL23A", "IL4", "IL5", 
+  "IL6", "MMP12", "MMP9", "MMP3", "VEGFA", "TNF", "TGFB1", "CSF1", "EGF", 
+  "FGF2", "IFNB1", "CMKLR1"
+)
+
+sasp_counts <- hsskin.ST@assays$Xenium$counts[sasp, ]
+sasp_positive <- colSums(sasp_counts) > 0
+  # CD45 & (CDKN1A | CDKN2A) &(!PCNA) & (IL6|IL8|hILa|IP10|CXCR3) ~ "SnC+ CD45+",
+  # CD45 ~ "CD45+",
+
+p21 <- hsskin.ST@assays$Xenium$counts["CDKN1A",] > 0.0
+p16 <- hsskin.ST@assays$Xenium$counts["CDKN2A",] > 0.0
+
+PCNA <- hsskin.ST@assays$Xenium$counts["PCNA",] > 0.0
+Ki67 <- hsskin.ST@assays$Xenium$counts["MKI67",] > 0.0
+
+CD45 <- hsskin.ST@assays$Xenium$counts["PTPRC",] > 0.0 # PTPRC is equivalent to CD45
+
+hsskin.ST@meta.data$snc <- case_when(
+  (p21 | p16) &(!PCNA | !Ki67) & sasp_positive ~ "SnC+",
+  CD45 ~ "CD45+",
+  TRUE ~ 'none'
+)
+
+
+
+hsskin.ST$snc <- factor(hsskin.ST$snc, levels = c("SnC+", "CD45+", "none" ))
+
+
+# the order of fov? "1738-Y" "1883-Y" "4890-O" "4891-O" "5138-O" "7503-Y"
+
+Idents(hsskin.ST) <- 'snc'
+p <- ImageDimPlot(hsskin.ST, fov = "fov.5", cols = c("red","#31476e", "#add8e6"), axes = FALSE, dark.background = FALSE,   size = 1.5, crop= TRUE)
+ggsave("5138_snc.png", plot = p, width = 5, height = 5, dpi = 500)
+
+hsskin.ST@meta.data$cd45snc <- case_when(
+  (p21 | p16) &(!PCNA | !Ki67) & sasp_positive & CD45 ~ "CD45+ SnC",
+  TRUE ~ 'none'
+)
+
+immsen3 <- as.data.frame(table(hsskin.ST$age, hsskin.ST$cd45snc))
+
+cells <- as.data.frame(immsen3 %>%
+                         group_by(Var1) %>%
+                         mutate(Freq = Freq / sum(Freq)))
+#cells <- cells[cells$Var2 == 'SnC+ CD45+',]
+cells <- cells[cells$Var2 != 'none',]
+
+
+cells <- cells %>%
+  group_by(Var1) %>%
+  mutate(Percentage = round(Freq * 100, 1))  # Convert proportion to percentage
+
+library(ggplot2)
+
+
+
+#ff0000
+
+
+### THE BLACK BORDER & NUMBERS
+# Create stacked bar plot with black borders and percentage labels
+stacked_barplot <- ggplot(cells, aes(x = Var1, y = Freq, fill = Var2))+
+  geom_bar(stat = "identity", position = "stack", color = "black") +  # Black borders
+  scale_fill_manual(values = "#ff0000") +
+  geom_text(aes(label = paste0(Percentage, "%")),
+            position = position_stack(vjust = 0.5),
+            size = 4, color = "black") +  # Percentage labels inside bars
+  theme_minimal() +
+  labs(
+    title = "Proportion of CD45+ Sncs in Young vs. Old",
+    x = "Age Group",
+    y = "Proportion",
+    fill = "Cell Types"
+  ) +
+  theme(
+    plot.title = element_blank(),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 12),
+    # Explicitly remove gridlines and background elements if using theme_minimal
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white", colour = NA),
+    plot.background = element_rect(fill = "white", colour = NA)
+  )
+
+# Display the plot
+print(stacked_barplot)
+ggsave("combined_sncimm.png", plot = stacked_barplot, width = 5, height = 5, dpi = 150)
+
+# 
+# 
+# # Subset for young and old
+# combined$age <- factor(combined$age, levels = c("young", "old"))
+# 
+# immsen3 <- as.data.frame(table(combined$age, combined$snc))
+# 
+# cells <- as.data.frame(immsen3 %>%
+#                          group_by(Var1) %>%
+#                          mutate(Freq = Freq / sum(Freq)))
+# #cells <- cells[cells$Var2 == 'SnC+ CD45+',]
+# cells <- cells[cells$Var2 != 'none',]
+# 
+# 
+# cells <- cells %>%
+#   group_by(Var1) %>%
+#   mutate(Percentage = round(Freq * 100, 1))  # Convert proportion to percentage
+# 
+# library(ggplot2)
+# 
+# 
+# 
+# 
+# ### THE BLACK BORDER & NUMBERS
+# # Create stacked bar plot with black borders and percentage labels
+# stacked_barplot <- ggplot(cells, aes(x = Var1, y = Freq, fill = Var2))+
+#   # 1. Change the color palette to a professional, muted scheme
+#   scale_fill_brewer(palette = "RdGy") + # "Set2" is a good choice for discrete, muted data +
+#   geom_bar(stat = "identity", position = "stack", color = "black") +  # Black borders
+#   geom_text(aes(label = paste0(Percentage, "%")), 
+#             position = position_stack(vjust = 0.5), 
+#             size = 4, color = "black") +  # Percentage labels inside bars
+#   theme_minimal() +
+#   labs(
+#     title = "Proportion of Immune Cell Types in Young vs. Old",
+#     x = "Age Group",
+#     y = "Proportion",
+#     fill = "Cell Types"
+#   ) +
+#   theme(
+#     plot.title = element_blank(),
+#     axis.text = element_text(size = 12),
+#     axis.title = element_text(size = 14),
+#     legend.title = element_text(size = 14),
+#     legend.text = element_text(size = 12),
+#     # Explicitly remove gridlines and background elements if using theme_minimal
+#     panel.grid.major = element_blank(), 
+#     panel.grid.minor = element_blank(),
+#     panel.background = element_rect(fill = "white", colour = NA),
+#     plot.background = element_rect(fill = "white", colour = NA)
+#   )
+# 
+# # Display the plot
+# print(stacked_barplot)
+# ggsave("combined_sncimm.png", plot = stacked_barplot, width = 5, height = 5, dpi = 150)
+# 
+# ###
+# 
+# Idents(o5104) <- 'snc'
+# DimPlot(o5104,reduction='umap', pt.size=0.5, order=c("SnC+ CD45+", 'SnC+','SnC- CD45+', 'none'), cols = c("#add8e6", "#31476e", "red", "purple")) + coord_fixed(ratio = 1/200)  + theme(axis.title.x=element_blank(), axis.title.y=element_blank())
+# ggsave(filename = "Results/o5104_snc_2.png", device = "png", width=8, height=8, dpi=1000)  # Works fine
+# 
+# DimPlot(o5104,reduction='umap', pt.size=0.5, order=c('CD45+', 'SnC+','none'), cols = c("white", "white", "#31476e")) + coord_fixed(ratio = 1/100)  + theme(axis.title.x=element_blank(), axis.title.y=element_blank())
+# ggsave(filename = "Results/o5104_snc_cd45.svg", device = "svg", width=8, height=8, dpi=1000)  # Works fine
+# 
+# Idents(hsskin.ST) <- 'snc'
+# DimPlot(hsskin.ST,reduction='umap', pt.size=0.5, order=c('SnC+','none'), cols = c("#add8e6", "red")) + theme(axis.title.x=element_blank(), axis.title.y=element_blank())
+# ggsave(filename = "Results/o5104_snc_2.png", device = "png", width=8, height=8, dpi=1000)  # Works fine
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

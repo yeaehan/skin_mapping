@@ -1,0 +1,155 @@
+```{r}
+
+
+hsskin.immune <- FindClusters(object = hsskin.immune, resolution = 2.0)
+
+
+marker_immune <- list(
+  "CD14+"   = c("CD14"), #monocyte
+  "CD68+" = c("CD68"),
+  "CD4+ CXCR3+/FOXP3+" = c("CD3E", "CD4", "TBX21", "CXCR3", "FOXP3"), #Th1 / Treg
+  "CD8+" = c("CD8A"),
+  "CD45+" = c("PTPRC")
+)
+
+Idents(hsskin.immune) <- 'SCT_snn_res.1'
+
+DotPlot(hsskin.immune, features = marker_immune) + 
+  # 1. Flip the plot so cell types are on the Y-axis and genes on X
+  #coord_flip() + 
+  # 2. Rotate gene names 45 degrees
+  RotatedAxis() +
+  # 3. Fine-tune text size and plot margins
+  theme(
+    axis.text.y = element_text(size = 10),      # Size of the "Basal_K" labels
+    axis.text.x = element_text(size = 10),       # Size of the Gene labels
+    strip.text.x = element_text(size = 6), 
+    # Optional: reduce the angle or adjust spacing if they still overlap
+    strip.background = element_blank(),
+    plot.margin = margin(10, 10, 10, 10)        # Adds extra space around the plot
+  )
+
+#seems like immune cell_3 consists of both Th1+ and CD8+ cells 
+#immune cell_2 consists of CD14+ (monocytes) and CD68+ (myeloid-macrophages)
+
+DimPlot(hsskin.ST, reduction = "umap", group.by = "immune_subclusters", label = TRUE, label.size = 3)
+
+
+```
+dim(hsskin.ST@assays$Xenium$counts)
+[1]   430 32549
+dim(hsskin.immune@assays$Xenium$counts)
+[1]  430 5332
+
+> table(hsskin.immune$SCT_snn_res.1)
+
+   0    1    2    3    4    5    6    7    8 
+1010  801  661  615  609  442  401  397  396 
+
+> table(hsskin.immune$SCT_snn_res.2)
+
+  0   1   2   3   4   5   6   7   8   9  10  11  12 
+605 533 504 473 446 404 403 397 396 382 298 271 220 
+
+
+```{r}
+# the order of fov? "1738-Y" "1883-Y" "4890-O" "4891-O" "5138-O" "7503-Y"
+
+Idents(hsskin.ST) <- 'immune_subclusters1'
+
+p1 = ImageDimPlot(hsskin.ST, fov = "fov", size = 1,alpha = 2, nmols = 50000,crop = TRUE,  dark.background = FALSE)
+
+p2 = ImageDimPlot(hsskin.ST, fov = "fov.2", size = 1,alpha = 2, nmols = 50000,crop = TRUE,  dark.background = FALSE)
+
+p3 = ImageDimPlot(hsskin.ST, fov = "fov.3", size = 1,alpha = 2, nmols = 50000,dark.background = FALSE,crop = TRUE,  mols.size = 0.9)
+
+p4 = ImageDimPlot(hsskin.ST, fov = "fov.4", size = 1,alpha = 2, nmols = 50000,dark.background = FALSE,crop = TRUE,  mols.size = 0.9)
+p5 = ImageDimPlot(hsskin.ST, fov = "fov.5", size = 1,alpha = 2, nmols = 50000,dark.background = FALSE,crop = TRUE,  mols.size = 0.9)
+p6 = ImageDimPlot(hsskin.ST, fov = "fov.6", size = 1,alpha = 2, nmols = 50000,dark.background = FALSE,crop = TRUE,  mols.size = 0.9)
+
+
+p1 + p2 + p3 + p4 + p5 +p6
+
+
+```
+
+```{r}
+
+hsskin.ST$age <- factor(hsskin.ST$age, levels = c("Young", "Old"))
+
+
+immsen3 <- as.data.frame(table(hsskin.ST$sample, hsskin.ST$immune_subclusters1))
+
+cells <- as.data.frame(immsen3 %>%
+                           group_by(Var1) %>%
+                           mutate(Freq = Freq / sum(Freq)))
+cells <- cells[cells$Var2 != 'none',]
+# cells <- cells[cells$Var2 != 'CD45+',]
+
+cells <- cells %>%
+  group_by(Var1) %>%
+  mutate(Percentage = round(Freq * 100, 1))  # Convert proportion to percentage
+
+library(ggplot2)
+
+stacked_barplot <- ggplot(cells, aes(x = Var1, y = Freq, fill = Var2)) +
+  geom_bar(stat = "identity", position = "stack", color = "black") +  # Black borders
+  geom_text(aes(label = paste0(Percentage, "%")),
+            position = position_stack(vjust = 0.5),
+            size = 2, color = "black") +  # Percentage labels inside bars
+  theme_minimal() +
+  labs(
+    title = "Proportion of Cell Types in Young vs. Old",
+    x = "Age Group",
+    y = "Proportion",
+    fill = "Cell Types"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 12)
+  )
+
+# Display the plot
+print(stacked_barplot)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+
+```
+

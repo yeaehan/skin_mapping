@@ -1,0 +1,159 @@
+---
+title: "1_Seurat_Xenium_DoubletFinder"
+output: html_document
+date: "2025-10-31"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align='center', fig.width=12, fig.height = 8)
+```
+
+```{r warning=FALSE, message=FALSE}
+library(Seurat)
+library(tidyverse)
+library(magrittr)
+library(ggplot2)
+library(patchwork)
+library(sctransform)
+library(cowplot)
+library(harmony)
+
+library(DoubletFinder)
+
+require(future)
+availableCores()
+plan("multisession", workers = 4)
+options(future.globals.maxSize = 8000 * 1024^2, future.seed= TRUE)
+```
+
+```{r}
+
+samples <- list.files("//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/0_james/projects/Xenium/Xenium_files")
+clean_samples <- samples[!grepl("\\.zarr$", samples)]
+
+sm_folders <- (paste0("//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/0_james/projects/Xenium/Xenium_files/", clean_samples, "/cell_feature_matrix"))
+
+sceList <- function(x, y){
+    counts_matrix <- Read10X(data.dir = x)[['Gene Expression']]
+    
+    # 3. Manually fix the row names that Read10X is failing to clean
+    #    This replaces all underscores with dashes
+    rownames(counts_matrix) <- gsub("_", "-", rownames(counts_matrix))
+
+      tmp_obj <- CreateSeuratObject(
+      counts = (counts_matrix),
+      min.cells = 3, 
+      project = y)
+    
+    #tmp_obj[["percent.mt"]] <- PercentageFeatureSet(object = tmp_obj, pattern = "^mt-")
+    #tmp_obj <- subset(tmp_obj, subset = nFeature_RNA > 200 & percent.mt < 20)
+    #tmp_obj <- subset(tmp_obj, subset = nFeature_RNA > 200 )
+    require(future)
+    plan("multisession", workers = 4)
+    options(future.globals.maxSize = 10000 * 1024^2)
+    tmp_obj <- NormalizeData(tmp_obj, normalization.method = "LogNormalize", scale.factor = 10000)
+    tmp_obj <- FindVariableFeatures(tmp_obj, selection.method = "vst", nfeatures = 4000)
+    tmp_obj <- ScaleData(tmp_obj, features = rownames(tmp_obj))
+    tmp_obj <- RunPCA(tmp_obj, features = VariableFeatures(tmp_obj), npcs = 50)
+    return(tmp_obj)
+}
+
+Y1738 <- sceList(sm_folders[1], samples[1])
+saveRDS(Y1738, file = "//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data/1_DoubleFinder_Y1738.rds")
+rm(Y1738)
+Y1883 <- sceList(sm_folders[2], samples[2])
+saveRDS(Y1883, file = "//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data/1_DoubleFinder_Y1883.rds")
+rm(Y1883)
+Y7503 <- sceList(sm_folders[6], samples[6])
+saveRDS(Y7503, file = "//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data/1_DoubleFinder_Y7503.rds")
+rm(Y7503)
+O4890 <- sceList(sm_folders[3], samples[3])
+saveRDS(O4890, file = "//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data/1_DoubleFinder_O4890.rds")
+rm(O4890)
+O4891 <- sceList(sm_folders[4], samples[4])
+saveRDS(O4891, file = "//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data/1_DoubleFinder_O4891.rds")
+rm(O4891)
+O5138 <- sceList(sm_folders[5], samples[5])
+saveRDS(O5138, file = "//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data/1_DoubleFinder_O5138.rds")
+rm(O5138)
+
+
+
+```
+## 2. Doublet detection per sample 
+```{r fig.width=12, fig.align='center'}
+
+setwd("//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2")
+samples <- list.files("data")
+clean_samples <- samples[grepl("^1_", samples)]
+samples
+expectRate <- c(0.037, 0.04, 0.029, 0.038, 0.028, 0.057, 0.052, 0.058, 0.04, 0.04, 0.051, 0.048)
+names(expectRate) <- clean_samples
+expectRate
+#i=1,2,3,...,12 (One by one for each sample)
+for (i in seq_along(samples)) {
+  tmpSample <- readRDS(file = paste0("data/", samples[i]))
+  ElbowPlot(tmpSample, reduction = "pca", ndims = 50)
+  tmpSample
+  
+  tmpSample <- tmpSample %>% 
+    FindNeighbors(dims = 1:40) %>% 
+    FindClusters(resolution = 0.5) %>% #here you could also change the resolution
+    RunUMAP(dims = 1:40)
+  tmpSample
+  DimPlot(tmpSample, reduction = "umap", group.by="seurat_clusters", label=TRUE) 
+  
+  ## pK Identification (no ground-truth)
+  sweep.res.list <- paramSweep(tmpSample, PCs = 1:40, sct = FALSE)
+  #data.table::fwrite(sweep.res.list, file = paste0(samples[i], "_sweep.res.list.txt"), sep = "\t")
+  sweep.stats <- summarizeSweep(sweep.res.list, GT = FALSE)
+  human <- find.pK(sweep.stats)
+  human$pK <- as.character(human$pK)
+  #Determine the maxi 
+  pK_human <- human$pK[which.max(human$BCmetric)] %>% as.numeric()
+  #Make the density plot
+  #pdf(file = paste0(samples[i], "_sweep.res.list.pdf"), useDingbats = FALSE, width = 8, height = 8)
+  {plot(x = human$pK, y = human$BCmetric, type="b", pch = 19, col = "blue", lty = 1, xlab="pK", ylab="BCmetric")
+  abline(v=pK_human,lwd=2,col='red',lty=2)
+  text(pK_human, max(human$BCmetric), as.character(pK_human), pos=4, col="red")}
+  #dev.off()
+  
+  #Homotypic Doublet Proportion Estimate -----------------------------------------------------------------------
+  annotations <- tmpSample@meta.data$seurat_clusters
+  homotypic.prop <- modelHomotypic(annotations)
+  nExp_poi <- round(expectRate[i]*(nrow(tmpSample@meta.data)))
+  nExp_poi.adj <- round(nExp_poi*(1-homotypic.prop))
+  
+  #Run DoubletFinder with varying classification stringencies---------------------------------------------------
+  tmpSample <- doubletFinder(tmpSample, PCs = 1:40, pN = 0.25, pK = pK_human, nExp = nExp_poi.adj, reuse.pANN = FALSE , sct = FALSE)
+  tmpSample <- doubletFinder(tmpSample, PCs = 1:40, pN = 0.25, pK = 0.08, nExp = nExp_poi.adj, reuse.pANN = FALSE , sct = FALSE)
+  tmpSample <- doubletFinder(tmpSample, PCs = 1:40, pN = 0.25, pK = 0.16, nExp = nExp_poi.adj, reuse.pANN = FALSE , sct = FALSE)
+  tmpSample <- doubletFinder(tmpSample, PCs = 1:40, pN = 0.25, pK = 0.2, nExp = nExp_poi.adj, reuse.pANN = FALSE , sct = FALSE)
+  #extract the Classification column
+  DF.name <- colnames(tmpSample@meta.data)[grepl("DF.classification", colnames(tmpSample@meta.data))]
+  
+  #Draw the plots
+  DF.name
+  for (j in seq_along(DF.name)) {
+    p1 <- DimPlot(tmpSample, reduction = "umap", group.by=DF.name[j], pt.size = 0.1, label=FALSE, label.size = 5)   
+    p2 <- VlnPlot(tmpSample,
+                  features = c("nFeature_RNA", "nCount_RNA"),
+                  pt.size = 0.01,
+                  group.by = DF.name[j]) + NoLegend()    
+    pdf(file = paste0(samples[i], "_umap_Doublets", DF.name[j], ".pdf"), useDingbats = FALSE, width = 12, height   = 8)
+    print(p1 + p2)
+    dev.off()
+  }
+  
+  #save the metadata of predicted doublets
+  tmp.doubletFinder <- as.data.frame(tmpSample@meta.data) %>% tibble::rownames_to_column(var = "barcode")
+  data.table::fwrite(tmp.doubletFinder, file = paste0(samples[i], "_umap_Doublets", DF.name[1], "optall.txt"), sep="\t")
+  
+  #delete unneeded variables
+  rm(tmpSample, sweep.res.list, sweep.stats, human, pK_human, annotations, homotypic.prop, nExp_poi, nExp_poi.adj, DF.name, p1, p2, tmp.doubletFinder)
+}
+```
+
+```{r}
+sessionInfo()
+```

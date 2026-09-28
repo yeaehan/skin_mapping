@@ -1,0 +1,82 @@
+name: skin-mapping-2
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  # Core runtimes
+  - python=3.11
+  - r-base>=4.3,<4.5
+  - pip
+
+  # Notebook and report tooling
+  - jupyterlab
+  - ipykernel
+  - r-irkernel
+  - r-rmarkdown
+  - r-knitr
+
+  # Python single-cell / spatial analysis
+  - anndata
+  - scanpy
+  - harmonypy
+  - squidpy
+  - celltypist
+  - decoupler-py
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+  - matplotlib
+  - seaborn
+  - tqdm
+  - openpyxl
+  - pytables
+
+  # R data wrangling and plotting
+  - r-tidyverse
+  - r-dplyr
+  - r-tidyr
+  - r-purrr
+  - r-readr
+  - r-magrittr
+  - r-plyr
+  - r-ggplot2
+  - r-ggpubr
+  - r-ggrepel
+  - r-patchwork
+  - r-cowplot
+  - r-scales
+  - r-colorspace
+  - r-pheatmap
+  - r-upsetr
+  - r-writexl
+
+  # R single-cell / spatial analysis
+  - r-seurat
+  - r-seuratobject
+  - r-sctransform
+  - r-harmony
+  - r-hdf5r
+  - r-reticulate
+  - r-future
+  - r-matrix
+  - r-sf
+  - bioconductor-gsva
+  - bioconductor-enhancedvolcano
+
+  # Install helpers for packages that are commonly source/GitHub-only.
+  - r-remotes
+  - r-biocmanager
+
+  # Some packages used in this repo may not be available consistently from
+  # conda across platforms. After creating the environment, install missing
+  # packages from R as needed, for example:
+  #
+  #   Rscript -e "remotes::install_github('chris-mcginnis-ucsf/DoubletFinder')"
+  #   Rscript -e "remotes::install_github('satijalab/seurat-wrappers')"
+  #   Rscript -e "remotes::install_github('samuel-marsh/scCustomize')"
+  #   Rscript -e "BiocManager::install(c('Banksy', 'monocle3'))"
+  #
+  # Other repo-specific packages to verify manually:
+  #   SCP, SpatialCellChat, SeuratDisk, seurathelpeR, introdataviz

@@ -1,0 +1,299 @@
+---
+title: "1_Seurat_CellTypeAnnotation_CODEX"
+output: html_document
+date: "2025-10-31"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align='center', fig.width=12, fig.height = 8)
+```
+
+```{r warning=FALSE, message=FALSE}
+install.packages("UpSetR")
+
+library(Seurat)
+library(tidyverse)
+library(magrittr)
+library(ggplot2)
+library(patchwork)
+library(sctransform)
+library(cowplot)
+library(harmony)
+```
+
+#####
+#Step 1: Load the Seurat object 
+#####
+
+```{r eval=FALSE, warning=FALSE, message=FALSE}
+setwd('//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data')
+codex <- readRDS(here("data", "codex.rds"))
+codex <- readRDS("//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data/codex.rds")
+saveRDS(codex, "//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/data/codex.rds")
+
+
+# Check if your lineage markers are overlapping
+# This creates a "truth table" to see if your markers are mutually exclusive
+library(UpSetR)
+
+#y4614 doesn't have Pan-Cytokeratin
+pc <- seurat_old@assays$RNA$counts["Pan-Cytokeratin",] > 0.0
+sma <- seurat_old@assays$RNA$counts["SMA",] > 0.0
+melanA <- seurat_old@assays$RNA$counts["MelanA",] > 0.0
+vimentin <- seurat_old@assays$RNA$counts["Vimentin",] > 0.0
+k5 <- seurat_old@assays$RNA$counts["Keratin 5",] > 0.0
+fil <- seurat_old@assays$RNA$counts["Filaggrin",] > 0.0
+
+
+#pc <- codex@assays$RNA$counts["Pan-Cytokeratin",] > 0.0
+sma <- codex@assays$RNA$counts["SMA",] > 0.0
+melanA <- codex@assays$RNA$counts["MelanA",] > 0.0
+vimentin <- codex@assays$RNA$counts["Vimentin",] > 0.0
+k5 <- codex@assays$RNA$counts["Keratin 5",] > 0.0
+fil <- codex@assays$RNA$counts["Filaggrin",] > 0.0
+CD45 <- codex@assays$RNA$counts["CD45",] > 0.0
+
+lineage_matrix <- as.data.frame(cbind(fil, melanA, k5, sma, vimentin))
+upset(lineage_matrix * 1) # Multiplying by 1 converts TRUE/FALSE to 1/0
+
+setwd("..")
+```
+
+
+```{r}
+library(patchwork)
+library(introdataviz)
+
+plot_split_violin_marker <- function(obj,
+                                     feature,
+                                     group_col = "snc",
+                                     assay = "RNA",
+                                     layer = "data",
+                                     cols = c("SnC-" = "#296d9e", "SnC+" = "#cc0b01")) {
+  
+  # Fetch data
+  df <- FetchData(obj, vars = c(feature, group_col), assay = assay, layer = layer)
+  colnames(df) <- c("value", "group")
+  df <- df %>% 
+    filter(!is.na(group)) %>% 
+    mutate(group = factor(group, levels = c("SnC-", "SnC+")))
+  
+  # Constant X value so halves glue together
+  df$feature_name <- feature
+  
+  p <- ggplot(df, aes(x = feature_name, y = value, fill = group)) +
+    # 1. The Split Violin
+    introdataviz::geom_split_violin(scale = "width", trim = TRUE, alpha = 0.9) +
+    
+    # 2. THE CROSSBARS: Flat horizontal lines at the mean for each group
+    # We use after_stat(y) to flatten the error bar into a single horizontal line
+    stat_summary(fun = mean, geom = "errorbar", 
+                 aes(ymax = after_stat(y), ymin = after_stat(y)), 
+                 width = 0.3, linewidth = 1.2, 
+                 position = position_dodge(width = 0.3), 
+                 color = "black") +
+    
+    # 3. THE STATS: Wilcoxon test
+    stat_compare_means(aes(group = group), method = "wilcox.test", 
+                       label = "p.signif", size = 6, vjust = 0.5) +
+    
+    # Aesthetics
+    scale_fill_manual(values = cols) +
+    theme_classic(base_size = 18) +
+    theme(
+      legend.position = "none",
+      axis.title.x = element_blank(),
+      axis.text.x = element_text(size = 14, face = "bold"),
+      axis.title.y = element_text(size = 14)
+    ) +
+    labs(y = "Expression")
+  
+  return(p)
+}
+
+# Run the list exactly as you had it
+features <- c("BCL2", "HMGB1", "LaminB1")
+
+p_list <- lapply(features, function(f) plot_split_violin_marker(
+  obj = codex,
+  feature = f,
+  group_col = "snc",
+  assay = "RNA",
+  layer = "data"   
+))
+
+# Combine and print!
+final_plot = p_list[[1]] + p_list[[2]] + p_list[[3]]
+
+final_plot
+ggsave("//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2/results/260225/codex_split_violins_subsenmarkers.png", plot = final_plot, width = 10, height = 3, dpi = 300)
+ggsave("//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2//results/260225/codex_split_violins_subsenmarkers.pdf", plot = final_plot, width = 10, height = 3, dpi = 300)
+
+
+```
+
+
+
+```{r cell type annotation}
+codex$snc <- codex$sencelltype
+codex$sencelltype <- NULL
+
+codex$age <- factor(codex$age,
+                    levels = c("young", "old"),
+                    labels = c("Young", "Old"))
+  
+
+SMA        <- codex@assays$RNA$counts["SMA", ] > 0
+MelanA     <- codex@assays$RNA$counts["MelanA", ] > 0
+Vimentin   <- codex@assays$RNA$counts["Vimentin", ] > 0
+Keratin5   <- codex@assays$RNA$counts["Keratin 5", ] > 0
+Keratin14  <- codex@assays$RNA$counts["Keratin 14", ] > 0
+Filaggrin  <- codex@assays$RNA$counts["Filaggrin", ] > 0
+
+codex$majorskincell <- dplyr::case_when(
+  MelanA ~ "Melanocyte",
+  SMA ~ "Smooth Muscle",
+  Vimentin ~ "Fibroblast",
+  (Keratin5 | Keratin14 | Filaggrin) ~ "Keratinocyte",
+  TRUE ~ "none"
+)
+
+codex$minorskincell1 <- dplyr::case_when(
+  MelanA ~ "Melanocyte",
+  SMA ~ "Smooth Muscle",
+  Vimentin ~ "Fibroblast",
+  (Keratin5 | Keratin14) ~ "Basal Keratinocyte",
+  Filaggrin ~ "Corneocyte",
+  !Filaggrin & !Keratin5 & !Keratin14 & pc ~ "Suprabasal Keratinocyte",
+  TRUE ~ "none"
+)
+
+
+
+```
+
+
+```{r}
+major_anatomical_order <- c(
+  "none",
+  "Smooth Muscle",    # deepest (vascular / arrector pili)
+  "Fibroblast",       # dermis
+  "Melanocyte",       # basal epidermis
+  "Keratinocyte"
+)
+
+minor_anatomical_order <- c(
+  "none",
+  "Smooth Muscle",            # deepest
+  "Fibroblast",               # dermis
+  "Melanocyte",               # basal epidermis
+  "Basal Keratinocyte",       # basal layer
+  "Suprabasal Keratinocyte",
+  "Corneocyte"               # stratum corneum (outermost)
+  
+)
+
+#### calculate the frequency of SnC in each cell type by age
+
+freq_major <- codex@meta.data %>%
+  filter(!is.na(age) & !is.na(majorskincell) & !is.na(snc)) %>%
+  group_by(majorskincell, age) %>%
+  summarise(
+    Total_Cells = n(),
+    SnC_Plus_Cells = sum(snc == "SnC+"),
+    Freq_SnC_Plus = (SnC_Plus_Cells / Total_Cells) * 100,
+    .groups = 'drop'
+  ) %>%
+  # Lock in your custom biological factor order
+  mutate(majorskincell = factor(majorskincell, levels = major_anatomical_order))
+  
+
+
+freq_minor <- codex@meta.data %>%
+  # Filter out NAs to keep the data clean
+  filter(!is.na(age) & !is.na(minorskincell1) & !is.na(snc)) %>%
+  group_by(minorskincell1, age) %>%
+  summarise(
+    Total_Cells = n(),
+    SnC_Plus_Cells = sum(snc == "SnC+"),
+    Freq_SnC_Plus = (SnC_Plus_Cells / Total_Cells) * 100,
+    .groups = 'drop'
+  ) %>%
+  # Lock in your custom biological factor order
+  mutate(minorskincell1 = factor(minorskincell1, levels = minor_anatomical_order)) %>%
+  # Drop any minor cell types that aren't in your list (optional, but keeps plot clean)
+  filter(!is.na(minorskincell1))
+
+
+major = ggplot(freq_major, aes(x = Freq_SnC_Plus, y = majorskincell)) +
+  
+  # Draw the connecting line between Young and Old
+  geom_line(aes(group = majorskincell), color = "gray70", linewidth = 1.2) +
+  
+  # Add the dots on the ends
+  geom_point(aes(color = age), size = 4.5) +
+  
+  # Colors (Assuming your age column has "Young" and "Old")
+  scale_color_manual(values = c("Young" = "#296d9e", "Old" = "#cc0b01")) +
+  theme_bw(base_size = 15) +
+  labs(
+    #title = "Senescence Shift by Major Skin Cell Type",
+    x = "% SnC+ Cells",
+    y = NULL, # Removes the redundant Y-axis label
+    color = "Age"
+  ) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed", color = "gray90"),
+    axis.text.y = element_text(face = "bold", color = "black")
+  )
+
+ggsave("//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2//results/260225/codex_snc_majorskin.png", plot = major, width = 6, height = 2, dpi = 300)
+
+
+
+minor = ggplot(freq_minor, aes(x = Freq_SnC_Plus, y = minorskincell1)) +
+  
+  # The connecting line
+  geom_line(aes(group = minorskincell1), color = "gray70", linewidth = 1.2) +
+  
+  # The Young vs Old dots
+  geom_point(aes(color = age), size = 4.5) +
+  
+  scale_color_manual(values = c("Young" = "#296d9e", "Old" = "#cc0b01")) +
+  theme_bw(base_size = 15) +
+  labs(
+    #title = "Senescence Shift by Minor Cell State",
+    #subtitle = "Ordered anatomically from Dermis to Skin Surface",
+    x = "% SnC+ Cells",
+    y = NULL, 
+    color = "Age"
+  ) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed", color = "gray90"),
+    axis.text.y = element_text(face = "bold", color = "black")
+  )
+
+ggsave("//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2//results/260225/codex_snc_minorskin.png", plot = minor, width = 6, height = 2, dpi = 300)
+
+
+```
+
+
+## Including Plots
+
+
+```{r, echo=FALSE}
+
+codex1 <-codex
+
+codex1 <- RunUMAP(codex1, reduction = "pca", dims=1:10, n.neighbors = 50, min.dist=0.3, spread=1)
+
+
+Idents(codex1) <- 'skincelltype'
+
+DimPlot(codex1, reduction = 'umap')
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

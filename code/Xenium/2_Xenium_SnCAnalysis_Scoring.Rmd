@@ -1,0 +1,1221 @@
+---
+title: "2_Xenium_SnCAnalysis"
+output: html_document
+---
+
+```{r}
+##########################################################
+# Xenium: SnC + cell type annotation + plots
+# (parallel to your 4i / CODEX workflow)
+##########################################################
+load("/home/ext_han_yeaeun_mayo_edu/skin_mapping/data/260311.RData")
+
+save.image("/home/ext_han_yeaeun_mayo_edu/skin_mapping/data/260311.RData") #260516
+
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(dplyr)
+  library(ggplot2)
+  library(scales)
+  library(ggpubr)
+  library(pheatmap)
+})
+
+# ---- set working dir (edit if needed) ----
+setwd("//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping_2")
+
+# ---- your Xenium Seurat object ----
+# assume it exists in the environment as: hsskin.ST
+# (if you need to load it, add: hsskin.ST <- readRDS("path/to/xenium.rds"))
+
+# =========================
+# 1) Choose assay/layer conventions
+# =========================
+# positivity calls: use Xenium counts (true detection)
+assay_pos  <- if ("Xenium" %in% Assays(hsskin.ST)) "Xenium" else DefaultAssay(hsskin.ST)
+layer_pos  <- "counts"
+
+# plotting expression: use SCT normalized (smooth distribution)
+assay_plot <- if ("SCT" %in% Assays(hsskin.ST)) "SCT" else DefaultAssay(hsskin.ST)
+layer_plot <- "data"
+
+# =========================
+# 3) Marker mapping (Xenium gene symbols)
+# =========================
+
+arrest_genes <- c(
+  "CDKN2A","CDKN1A","CDKN1B","CDKN2B", "CDKN1C", "CDKN2C"
+)
+
+prolif_genes <- c(
+  "MKI67","PCNA","CENPF","CENPV","UBE2C","CDK1","STMN1","ORC6"
+)
+
+sasp_genes <- c(
+"CCL11","CCL13","CCL14","CCL15","CCL16","CCL19","CCL2","CCL20","CCL21",
+"CCL26","CCL28","CCL3","CCL3L1","CCL4","CCL5","CCL7","CCL8",
+"CXCL1","CXCL10","CXCL11","CXCL12","CXCL13","CXCL14","CXCL16","CXCL2",
+"CXCL3","CXCL5","CXCL6","CXCL9",
+"IL12B","IL13","IL15","IL18","IL1A","IL1B","IL2","IL23A","IL4","IL5","IL6",
+"MMP12","MMP9","MMP3",
+"VEGFA","TNF","TGFB1","CSF1","EGF","FGF2","IFNB1","CMKLR1"
+)
+
+Antiapoptotic_genes <- c(
+  "BCL2"
+)
+
+get_bin <- function(obj, genes, assay = "Xenium", layer = "counts") {
+  if (length(genes) == 0) return(matrix(FALSE, 0, ncol(obj), dimnames = list(NULL, colnames(obj))))
+  LayerData(obj, assay = assay, layer = layer)[genes, , drop = FALSE] > 0
+}
+
+hsskin.ST$arrest_score  <- colMeans(get_bin(hsskin.ST, arrest_genes, assay_pos, layer_pos))
+hsskin.ST$prolif_score  <- colMeans(get_bin(hsskin.ST, prolif_genes, assay_pos, layer_pos))
+hsskin.ST$sasp_score    <- colMeans(get_bin(hsskin.ST, sasp_genes, assay_pos, layer_pos))
+hsskin.ST$Antiapoptotic_score <- colMeans(get_bin(hsskin.ST, Antiapoptotic_genes, assay_pos, layer_pos))
+
+
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+df_scores <- hsskin.ST@meta.data %>%
+  select(sample, arrest_score, prolif_score, sasp_score, Antiapoptotic_score) %>%
+  pivot_longer(
+    cols = c(arrest_score, prolif_score, sasp_score, Antiapoptotic_score),
+    names_to = "score_type",
+    values_to = "score"
+  )
+
+
+ggplot(df_scores, aes(x = sample, y = score)) +
+  geom_violin(fill = "grey80", color = "black", scale = "width") +
+  geom_boxplot(width = 0.1, outlier.shape = NA) +
+  facet_wrap(~score_type, scales = "free_y") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+
+ggplot(df_scores, aes(x = sample, y = score, fill = sample)) +
+  geom_boxplot(outlier.size = 0.3) +
+  facet_wrap(~score_type, scales = "free_y") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  )
+
+
+
+
+
+p16 <- get_pos(hsskin.ST, "CDKN2A", assay_pos, layer_pos)
+p21 <- get_pos(hsskin.ST, "CDKN1A", assay_pos, layer_pos)
+
+hsskin.ST$SnC_score <- with(
+  hsskin.ST@meta.data,
+  2*arrest_score + 1.5*sasp_score + 0.5*Antiapoptotic_score - 2*prolif_score
+)
+
+hsskin.ST$SnC_highconf <- ifelse(
+  (p16 | p21) & sasp_score >= 0.10 & prolif_score == 0,
+  "SnC+", "SnC-"
+)
+
+hsskin.ST$SnC_permissive <- ifelse(
+  SnC_score >= 0.8,
+  "SnC+", "SnC-"
+)
+```
+
+```{r}
+hsskin.ST$SnC_colMeans <- (
+  hsskin.ST$arrest_score +
+  hsskin.ST$sasp_score +
+  hsskin.ST$Antiapoptotic_score -
+  hsskin.ST$prolif_score
+) / 4
+
+df_sample_scores_colmeans <- hsskin.ST@meta.data %>%
+  group_by(sample) %>%
+  summarise(
+    arrest_score = median(arrest_score, na.rm = TRUE),
+    prolif_score = median(prolif_score, na.rm = TRUE),
+    sasp_score = median(sasp_score, na.rm = TRUE),
+    Antiapoptotic_score = median(Antiapoptotic_score, na.rm = TRUE),
+    SnC_colMeans = median(SnC_colMeans, na.rm = TRUE)
+  )
+
+library(tidyr)
+
+df_sample_long_colmeans <- df_sample_scores_colmeans %>%
+  pivot_longer(
+    cols = -sample,
+    names_to = "score_type",
+    values_to = "score"
+  ) %>%
+  mutate(score_type = factor(
+    score_type,
+    levels = c(
+      "arrest_score",
+      "prolif_score",
+      "sasp_score",
+      "Antiapoptotic_score",
+      "SnC_colMeans"
+    )
+  ))
+
+library(ggplot2)
+
+ggplot(df_sample_long_colmeans, aes(x = sample, y = score)) +
+  geom_point(size = 3) +
+  geom_line(aes(group = score_type), alpha = 0.4) +
+  facet_wrap(~score_type, scales = "free_y") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+
+
+
+
+```
+
+
+
+```{r}
+library(dplyr)
+library(pheatmap)
+
+# ----------------------------
+# 1) Keep genes in desired order
+# ----------------------------
+ordered_genes <- c(arrest_genes, prolif_genes, sasp_genes, Antiapoptotic_genes)
+ordered_genes <- ordered_genes[ordered_genes %in% rownames(hsskin.ST)]
+
+# ----------------------------
+# 2) Pull expression matrix
+# ----------------------------
+mat <- LayerData(
+  hsskin.ST,
+  assay = assay_pos,
+  layer = layer_pos
+)[ordered_genes, , drop = FALSE]
+
+# ----------------------------
+# 3) Sample vector
+# ----------------------------
+sample_vec <- hsskin.ST$sample
+names(sample_vec) <- colnames(hsskin.ST)
+
+sample_levels <- unique(sample_vec)
+
+# ----------------------------
+# 4) Fraction-positive per sample
+# ----------------------------
+sample_frac_pos <- sapply(sample_levels, function(s) {
+  cells <- names(sample_vec)[sample_vec == s]
+  rowMeans(mat[, cells, drop = FALSE] > 0)
+})
+
+sample_frac_pos <- as.matrix(sample_frac_pos)
+rownames(sample_frac_pos) <- ordered_genes
+colnames(sample_frac_pos) <- as.character(sample_levels)
+
+# ----------------------------
+# 5) Row annotation: gene module
+# ----------------------------
+row_annot <- data.frame(
+  module = c(
+    rep("Arrest", length(arrest_genes[arrest_genes %in% ordered_genes])),
+    rep("Proliferation", length(prolif_genes[prolif_genes %in% ordered_genes])),
+    rep("SASP", length(sasp_genes[sasp_genes %in% ordered_genes])),
+    rep("Antiapoptotic", length(Antiapoptotic_genes[Antiapoptotic_genes %in% ordered_genes]))
+  )
+)
+rownames(row_annot) <- ordered_genes
+
+# ----------------------------
+# 6) Column annotation: one row per sample
+#    Edit these columns to match your metadata
+# ----------------------------
+meta_sample <- hsskin.ST@meta.data %>%
+  select(sample) %>%          # change/add columns here
+  distinct()
+
+meta_sample <- as.data.frame(meta_sample)
+rownames(meta_sample) <- meta_sample$sample
+#meta_sample$sample <- NULL
+
+# match order of heatmap columns
+col_annot <- meta_sample[colnames(sample_frac_pos), , drop = FALSE]
+
+# ----------------------------
+# 7) Heatmap
+# ----------------------------
+pheatmap(
+  sample_frac_pos,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  annotation_row = row_annot,
+  annotation_col = col_annot,
+  border_color = NA,
+  scale = 'row',
+  main = "Fraction of positive cells per sample"
+)
+```
+
+
+```{r}
+library(pheatmap)
+
+# Extract the four scores from the metadata
+score_data <- hsskin.ST@meta.data[, c("arrest_z", "sasp_z", "Antiapoptotic_z", "prolif_z")]
+
+# Drop any NAs to ensure the math runs cleanly
+score_data <- na.omit(score_data)
+
+# Calculate the correlation matrix (Spearman is usually safer for single-cell scores)
+cor_matrix <- cor(score_data, method = "spearman")
+
+
+
+# Plot the heatmap
+pheatmap(
+  cor_matrix,
+  display_numbers = TRUE,           # Prints the exact R value in the box
+  fontsize_number = 12,
+  color = colorRampPalette(c("#08519c", "white", "#cc0b01"))(50), # Blue to White to Red
+  breaks = seq(-1, 1, length.out = 51), # Locks the scale strictly from -1 to 1
+  main = "Spearman Correlation: Senescence Modules",
+  angle_col = 45
+)
+```
+
+```{r}
+library(pheatmap)
+library(Seurat)
+
+# 1. Define the specific genes that make up each module
+# (Using the exact Xenium gene symbols from your earlier code)
+module_list <- list(
+  Arrest = arrest_genes,         # p21, p16
+  Proliferation = prolif_genes, 
+  Antiapoptotic = c("BCL2"),              # Add others if you have them in the panel
+  SASP = sasp_genes               # Your filtered list of 51 SASP genes
+)
+
+# Unlist to get a single vector of all target genes
+all_target_genes <- unname(unlist(module_list))
+
+# Ensure we only try to fetch genes that actually exist in the object's assay
+all_target_genes <- intersect(all_target_genes, rownames(hsskin.ST[["Xenium"]]))
+
+# 2. Extract the normalized expression data
+# We use slot/layer = "data" because raw counts will artificially skew the correlation due to zeros
+gene_expr_matrix <- FetchData(
+  hsskin.ST, 
+  vars = all_target_genes, 
+  layer = "data" 
+)
+
+# 3. Calculate the Spearman correlation matrix
+gene_cor_matrix <- cor(gene_expr_matrix, method = "spearman")
+
+# 4. Build the annotation dataframe so pheatmap knows which gene belongs to which module
+annotation_df <- data.frame(
+  Module = rep(names(module_list), lengths(module_list))
+)
+# Match the rownames of the annotation to the gene names
+rownames(annotation_df) <- unname(unlist(module_list))
+# Filter it down to just the genes that were actually found in the object
+annotation_df <- annotation_df[rownames(gene_cor_matrix), , drop = FALSE]
+
+# 5. Define custom colors for the modules (optional, but looks cleaner)
+ann_colors <- list(
+  Module = c(
+    Arrest = "#d95f02", 
+    Proliferation = "#1b9e77", 
+    Antiapoptotic = "#7570b3", 
+    SASP = "#e7298a"
+  )
+)
+
+pdf(file = "Gene_Correlation_Heatmap.pdf", width = 10, height = 10)
+
+# 6. Plot the annotated heatmap
+pheatmap(
+  gene_cor_matrix,
+  annotation_col = annotation_df,
+  annotation_row = annotation_df,      # Adds the color track to both axes
+  annotation_colors = ann_colors,
+  show_rownames = TRUE,                
+  show_colnames = TRUE,
+  fontsize_row = 6,                    # Shrunk to fit all ~50 SASP genes
+  fontsize_col = 6,
+  color = colorRampPalette(c("#08519c", "white", "#cc0b01"))(50),
+  breaks = seq(-1, 1, length.out = 51),
+  main = "Gene-Level Correlation: Senescence Modules",
+  treeheight_row = 20,                 # Shrinks the dendrogram lines slightly
+  treeheight_col = 20
+)
+
+dev.off()
+```
+
+
+```{r}
+library(Seurat)
+library(GSVA)
+
+expr_mat <- LayerData(hsskin.ST, assay = assay_pos, layer = layer_pos)
+
+arrest_present  <- arrest_genes[arrest_genes %in% rownames(expr_mat)]
+prolif_present  <- prolif_genes[prolif_genes %in% rownames(expr_mat)]
+sasp_present    <- sasp_genes[sasp_genes %in% rownames(expr_mat)]
+Antiapoptotic_present <- Antiapoptotic_genes[Antiapoptotic_genes %in% rownames(expr_mat)]
+
+snc_sets <- list(
+  Arrest  = arrest_present,
+  Prolif  = prolif_present,
+  SASP    = sasp_present,
+  Antiapoptotic = Antiapoptotic_present
+)
+
+# ssGSEA
+ssgsea_scores <- gsva(
+  expr = as.matrix(expr_mat),
+  gset.idx.list = snc_sets,
+  method = "ssgsea",
+  kcdf = "Poisson",
+  abs.ranking = TRUE,
+  verbose = FALSE
+)
+
+hsskin.ST$Arrest_ssgsea  <- ssgsea_scores["Arrest", ]
+hsskin.ST$Prolif_ssgsea  <- ssgsea_scores["Prolif", ]
+hsskin.ST$SASP_ssgsea    <- ssgsea_scores["SASP", ]
+hsskin.ST$Antiapoptotic_ssgsea <- ssgsea_scores["Antiapoptotic", ]
+
+hsskin.ST$SnC_ssgsea <- (
+  hsskin.ST$Arrest_ssgsea +
+  hsskin.ST$SASP_ssgsea +
+  hsskin.ST$Antiapoptotic_ssgsea -
+  hsskin.ST$Prolif_ssgsea
+) / 4
+
+# GSVA
+gsva_scores <- gsva(
+  expr = as.matrix(expr_mat),
+  gset.idx.list = snc_sets,
+  method = "gsva",
+  kcdf = "Poisson",
+  verbose = FALSE
+)
+
+hsskin.ST$Arrest_gsva  <- gsva_scores["Arrest", ]
+hsskin.ST$Prolif_gsva  <- gsva_scores["Prolif", ]
+hsskin.ST$SASP_gsva    <- gsva_scores["SASP", ]
+hsskin.ST$Antiapoptotic_gsva <- gsva_scores["Antiapoptotic", ]
+
+hsskin.ST$SnC_gsva <- (
+  hsskin.ST$Arrest_gsva +
+  hsskin.ST$SASP_gsva +
+  hsskin.ST$Antiapoptotic_gsva -
+  hsskin.ST$Prolif_gsva
+) / 4
+
+
+DefaultAssay(hsskin.ST) <- assay_pos
+hsskin.ST <- NormalizeData(hsskin.ST, assay = assay_pos, verbose = FALSE)
+
+
+# control pool = all genes in Xenium panel
+pool_genes <- rownames(hsskin.ST[[assay_pos]])
+
+# AddModuleScore for each module
+hsskin.ST <- AddModuleScore(
+  object = hsskin.ST,
+  features = list(arrest_present),
+  assay = assay_pos,
+  pool = pool_genes,
+  name = "Arrest_AMS",
+  ctrl = 3,
+  nbin = 5,
+  seed = 1
+)
+
+hsskin.ST <- AddModuleScore(
+  object = hsskin.ST,
+  features = list(prolif_present),
+  assay = assay_pos,
+  pool = pool_genes,
+  name = "Prolif_AMS",
+  ctrl = 3,
+  nbin = 5,
+  seed = 1
+)
+
+hsskin.ST <- AddModuleScore(
+  object = hsskin.ST,
+  features = list(sasp_present),
+  assay = assay_pos,
+  pool = pool_genes,
+  name = "SASP_AMS",
+  ctrl = 3,
+  nbin = 5,
+  seed = 1
+)
+
+hsskin.ST <- AddModuleScore(
+  object = hsskin.ST,
+  features = list(Antiapoptotic_present),
+  assay = assay_pos,
+  pool = pool_genes,
+  name = "Antiapoptotic_AMS",
+  ctrl = 3,
+  nbin = 5,
+  seed = 1
+)
+
+hsskin.ST$SnC_AddModuleScore <- (
+  hsskin.ST$Arrest_AMS1 +
+  hsskin.ST$SASP_AMS1 +
+  hsskin.ST$Antiapoptotic_AMS1 -
+  hsskin.ST$Prolif_AMS1
+) / 4
+
+hsskin.ST$SnC_binary <- ifelse(
+  hsskin.ST$SnC_AddModuleScore > 0,
+  "SnC+",
+  "SnC-"
+)
+
+df_snc <- hsskin.ST@meta.data %>%
+  group_by(sample) %>%
+  summarise(SnC_fraction = mean(SnC_binary == "SnC+"))
+
+ggplot(df_snc, aes(x = sample, y = SnC_fraction)) +
+  geom_col(fill = "steelblue") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+```{r}
+df_ams <- hsskin.ST@meta.data %>%
+  select(
+    sample,
+    Arrest_AMS1,
+    Prolif_AMS1,
+    SASP_AMS1,
+    Antiapoptotic_AMS1,
+    SnC_AddModuleScore
+  ) %>%
+  pivot_longer(
+    cols = c(Arrest_AMS1, Prolif_AMS1, SASP_AMS1, Antiapoptotic_AMS1, SnC_AddModuleScore),
+    names_to = "score_type",
+    values_to = "score"
+  )
+
+df_sample_scores <- hsskin.ST@meta.data %>%
+  group_by(sample) %>%
+  summarise(
+    Arrest_AMS1 = median(Arrest_AMS1, na.rm = TRUE),
+    Prolif_AMS1 = median(Prolif_AMS1, na.rm = TRUE),
+    SASP_AMS1 = median(SASP_AMS1, na.rm = TRUE),
+    Antiapoptotic_AMS1 = median(Antiapoptotic_AMS1, na.rm = TRUE),
+    SnC_AddModuleScore = median(SnC_AddModuleScore, na.rm = TRUE)
+  )
+
+df_sample_long <- df_sample_scores %>%
+  pivot_longer(
+    cols = -sample,
+    names_to = "score_type",
+    values_to = "score"
+  ) %>%
+  mutate(score_type = factor(
+    score_type,
+    levels = c(
+      "Arrest_AMS1",
+      "Prolif_AMS1",
+      "SASP_AMS1",
+      "Antiapoptotic_AMS1",
+      "SnC_AddModuleScore"
+    )
+  ))
+
+library(ggplot2)
+
+ggplot(df_sample_long, aes(x = sample, y = score)) +
+  geom_point(size = 3) +
+  geom_line(aes(group = score_type), alpha = 0.4) +
+  facet_wrap(~score_type, scales = "free_y") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+
+
+```
+
+
+
+```{r}
+hsskin.ST$arrest_z  <- as.numeric(scale(hsskin.ST$arrest_score))
+hsskin.ST$prolif_z  <- as.numeric(scale(hsskin.ST$prolif_score))
+hsskin.ST$sasp_z    <- as.numeric(scale(hsskin.ST$sasp_score))
+hsskin.ST$Antiapoptotic_z <- as.numeric(scale(hsskin.ST$Antiapoptotic_score))
+
+hsskin.ST$arrest_flag  <- hsskin.ST$arrest_z  > 0
+hsskin.ST$sasp_flag    <- hsskin.ST$sasp_z    > 0
+#hsskin.ST$Antiapoptotic_flag <- hsskin.ST$Antiapoptotic_z > 0
+hsskin.ST$prolif_flag  <- hsskin.ST$prolif_z  < 0
+
+hsskin.ST$SnC_votes <-
+  hsskin.ST$arrest_flag +
+  hsskin.ST$sasp_flag +
+  hsskin.ST$prolif_flag
+
+hsskin.ST$SnC_binary <- ifelse(hsskin.ST$SnC_votes == 3, "SnC+", "SnC-")
+
+library(ggplot2)
+
+ggplot(hsskin.ST@meta.data, aes(x = arrest_z)) +
+  geom_histogram(bins = 50) +
+  theme_classic()
+
+library(dplyr)
+
+df_snc_sample <- hsskin.ST@meta.data %>%
+  group_by(sample) %>%
+  summarise(
+    SnC_fraction = mean(SnC_binary == "SnC+")
+  )
+
+ggplot(df_snc_sample, aes(x = sample, y = SnC_fraction)) +
+  geom_col(fill = "steelblue") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+################################
+# Trying a continuous composite score
+################################
+# Create a continuous metric for senescence
+hsskin.ST$Composite_SnC_Score <- 
+  hsskin.ST$arrest_z + 
+  hsskin.ST$sasp_z + 
+  hsskin.ST$Antiapoptotic_z - 
+  hsskin.ST$prolif_z
+
+# Find the value at the 95th percentile
+snc_cutoff <- quantile(hsskin.ST$Composite_SnC_Score, probs = 0.97, na.rm = TRUE)
+
+# Print the cutoff value to your console to verify
+print(paste("Top 1% threshold is:", round(snc_cutoff, 3)))
+
+hsskin.ST$SnC_binary <- ifelse(
+  hsskin.ST$Composite_SnC_Score >= snc_cutoff, 
+  "SnC+", 
+  "SnC-"
+)
+
+library(ggplot2)
+library(dplyr)
+
+# Plot the distribution of the composite score with a line at the 5% cutoff
+ggplot(hsskin.ST@meta.data, aes(x = Composite_SnC_Score)) +
+  geom_histogram(bins = 50, fill = "gray70", color = "black") +
+  geom_vline(xintercept = snc_cutoff, color = "red", linetype = "dashed", size = 1) +
+  annotate("text", x = snc_cutoff + 0.1, y = Inf, label = "Top 1%", 
+           vjust = 1.5, color = "red") +
+  theme_classic(base_size = 14) +
+  labs(title = "Composite Senescence Score Distribution",
+       x = "Composite Z-Score (Arrest + SASP + AntiApop - Prolif)",
+       y = "Cell Count")
+
+# Plot the sample-level SnC fractions (should average around 0.05 across the dataset)
+df_snc_sample <- hsskin.ST@meta.data %>%
+  group_by(sample, age) %>%
+  summarise(
+    SnC_fraction = mean(SnC_binary == "SnC+", na.rm = TRUE)
+  )
+
+ggplot(df_snc_sample, aes(x = sample, y = SnC_fraction)) +
+  geom_col(fill = "steelblue") +
+  geom_hline(yintercept = 0.01, color = "red", linetype = "dashed") +
+  theme_classic(base_size = 14) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Fraction of Top 1% SnC+ Cells per Sample",
+       y = "SnC+ Fraction",
+       x = "Sample")
+
+ggplot(df_snc_sample, aes(x = age, y = SnC_fraction)) +
+  geom_col(fill = "steelblue") +
+  geom_hline(yintercept = 0.01, color = "red", linetype = "dashed") +
+  theme_classic(base_size = 14) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Fraction of Top 1% SnC+ Cells by age",
+       y = "SnC+ Fraction",
+       x = "Age")
+
+
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+# 1. Calculate the pooled fraction for the main bars
+# (Total SnC+ cells per age / Total cells per age)
+df_pooled <- hsskin.ST@meta.data %>%
+  filter(!is.na(sample) & !is.na(age)) %>%
+  group_by(age) %>%
+  summarise(
+    pooled_fraction = sum(SnC_binary == "SnC+", na.rm = TRUE) / n(),
+    .groups = "drop"
+  )
+
+# 2. Calculate the individual sample fractions for the dots
+df_samples <- hsskin.ST@meta.data %>%
+  filter(!is.na(sample) & !is.na(age)) %>%
+  group_by(age, sample) %>%
+  summarise(
+    sample_fraction = sum(SnC_binary == "SnC+", na.rm = TRUE) / n(),
+    .groups = "drop"
+  )
+
+# 3. Plot the pooled bars with the sample dots overlaid
+blue_col <- "#296d9e"
+ymax <- max(df_samples$sample_fraction, na.rm = TRUE) * 1.15
+
+ggplot() +
+  # Draw the main bars using the pooled data
+  geom_col(
+    data = df_pooled, 
+    aes(x = age, y = pooled_fraction),
+    fill = blue_col, color = "black", width = 0.6
+  ) +
+  # Overlay the dots using the individual sample data
+  geom_point(
+    data = df_samples, 
+    aes(x = age, y = sample_fraction),
+    position = position_jitter(width = 0.07, seed = 42),
+    size = 3, color = "black"
+  ) +
+  scale_y_continuous(
+    limits = c(0, ymax),
+    breaks = pretty(c(0, ymax), n = 4),
+    labels = percent_format(accuracy = 0.1),
+    expand = c(0, 0)
+  ) +
+  theme_classic(base_size = 18) +
+  labs(
+    #title = "Pooled Fraction of Top 1% SnC+ Cells by Age",
+    x = NULL, 
+    y = "SnC+ Fraction"
+  )
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(ggpubr)
+library(ggpubr)
+library(patchwork)
+
+# Define the features and the statistical comparison
+features <- c("arrest_z", "sasp_z", "Antiapoptotic_z", "prolif_z")
+my_comparisons <- list(c("Young", "Old"))
+
+# Loop through each feature, build the VlnPlot, and add the ggplot layers
+plot_list <- lapply(features, function(feature) {
+  
+  # Base Seurat Plot
+  p <- VlnPlot(
+    hsskin.ST,
+    features = feature,
+    group.by = "age",
+    cols = c("#9ecae1", "#08519c"),
+    pt.size = 0
+  ) 
+  
+  # Add the crossbar and p-value on top
+  p <- p + 
+    stat_summary(fun = median, geom = "crossbar", width = 0.3, color = "black", linewidth = 0.5) +
+    stat_compare_means(comparisons = my_comparisons, method = "wilcox.test", label = "p.signif") +
+    scale_y_continuous(expand = expansion(mult = c(0.05, 0.2))) + # <-- Adds 20% padding to the top
+    theme(axis.title.x = element_blank(), legend.position = "none")
+  
+  return(p)
+})
+
+# Combine the individual plots back into a 2x2 grid
+wrap_plots(plot_list, ncol = 2)
+```
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+plot_xenium_snc_custom <- function(
+  obj,
+  sample_id,
+  sample_col = "sample",
+  snc_col = "SnC_binary",
+  coord_slot = "fov",
+  bg_color = "grey88",
+  snc_color = "#D73027",
+  bg_size = 0.05,
+  snc_size = 0.12,
+  flip_y = TRUE
+) {
+  # coordinates
+  coords <- obj@images[[coord_slot]]$centroids@coords %>%
+    as.data.frame()
+  coords$cell_id <- rownames(coords)
+  
+  # metadata
+  meta <- obj@meta.data %>%
+    as.data.frame() %>%
+    mutate(cell_id = rownames(.)) %>%
+    select(cell_id, all_of(sample_col), all_of(snc_col))
+  
+  # merge and subset sample
+  df <- left_join(coords, meta, by = "cell_id") %>%
+    filter(.data[[sample_col]] == sample_id)
+  
+  # guess x/y column names
+  x_col <- "x"
+  y_col <- "y"
+  
+  if (is.na(x_col) || is.na(y_col)) {
+    stop("Could not identify x/y columns in hsskin.ST@images$fov$centroids@coords")
+  }
+  
+  snc_frac <- mean(df[[snc_col]] == "SnC+", na.rm = TRUE)
+  
+  p <- ggplot() +
+    geom_point(
+      data = df %>% filter(.data[[snc_col]] != "SnC+"),
+      aes_string(x = x_col, y = y_col),
+      color = bg_color,
+      size = bg_size,
+      alpha = 0.8
+    ) +
+    geom_point(
+      data = df %>% filter(.data[[snc_col]] == "SnC+"),
+      aes_string(x = x_col, y = y_col),
+      color = snc_color,
+      size = snc_size,
+      alpha = 0.95
+    ) +
+    coord_fixed() +
+    theme_void() +
+    labs(title = paste0(sample_id, " (", round(snc_frac * 100, 1), "% SnC+)")) +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold")
+    )
+  
+  if (flip_y) {
+    p <- p + scale_y_reverse()
+  }
+  
+  p
+}
+
+
+sample_ids <- unique(hsskin.ST$sample)
+
+plot_list <- lapply(sample_ids, function(s) {
+  plot_xenium_snc_custom(
+    obj = hsskin.ST,
+    sample_id = s,
+    sample_col = "sample",
+    snc_col = "SnC_binary",
+    coord_slot = "fov"
+  )
+})
+
+wrap_plots(plot_list, ncol = 2)
+
+
+
+```
+
+```{r}
+
+library(dplyr)
+
+# samples and their cell counts
+sample_counts <- table(hsskin.ST$sample)
+
+# available FOVs
+fov_names <- names(hsskin.ST@images)
+
+# count cells in each FOV
+fov_counts <- sapply(fov_names, function(fov) {
+  nrow(hsskin.ST@images[[fov]]$centroids@coords)
+})
+
+# convert to data frames
+sample_df <- data.frame(
+  sample = names(sample_counts),
+  n = as.numeric(sample_counts)
+)
+
+fov_df <- data.frame(
+  fov = fov_names,
+  n = as.numeric(fov_counts)
+)
+
+# match by cell count
+sample_fov_map <- dplyr::left_join(sample_df, fov_df, by = "n")
+
+sample_fov_map
+
+library(ggplot2)
+
+plot_xenium_snc <- function(obj, sample_id, fov_name) {
+
+  coords <- obj@images[[fov_name]]$centroids@coords
+  coords <- as.data.frame(coords)
+
+  meta <- obj@meta.data %>%
+    as.data.frame() %>%
+    filter(sample == sample_id)
+
+  if (nrow(coords) != nrow(meta)) {
+    stop(paste("Coordinate / metadata mismatch for", sample_id))
+  }
+
+  df <- cbind(coords, meta)
+
+  snc_frac <- mean(df$SnC_binary == "SnC+")
+
+  ggplot() +
+    geom_point(
+      data = df %>% filter(SnC_binary != "SnC+"),
+      aes(x = x, y = y),
+      color = "grey90",
+      size = 0.05
+    ) +
+    geom_point(
+      data = df %>% filter(SnC_binary == "SnC+"),
+      aes(x = x, y = y),
+      color = "#D73027",
+      size = 0.12
+    ) +
+    coord_fixed() +
+    scale_y_reverse() +
+    theme_void() +
+    labs(
+      title = paste0(sample_id, " (", round(snc_frac * 100,1), "% SnC+)")
+    ) +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+}
+
+library(patchwork)
+
+plot_list <- lapply(1:nrow(sample_fov_map), function(i) {
+
+  sample_id <- sample_fov_map$sample[i]
+  fov_name  <- sample_fov_map$fov[i]
+
+  plot_xenium_snc(
+    obj = hsskin.ST,
+    sample_id = sample_id,
+    fov_name = fov_name
+  )
+})
+
+wrap_plots(plot_list, ncol = 4)
+
+for (i in 1:nrow(sample_fov_map)) {
+
+  sample_id <- sample_fov_map$sample[i]
+  fov_name  <- sample_fov_map$fov[i]
+
+  p <- plot_xenium_snc(
+    obj = hsskin.ST,
+    sample_id = sample_id,
+    fov_name = fov_name
+  )
+
+  ggsave(
+    paste0(sample_id, "_SnC_map.png"),
+    plot = p,
+    width = 5,
+    height = 5,
+    dpi = 300
+  )
+}
+```
+
+
+
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(scales)
+
+# Calculate proportions of major cell types within SnC+ and SnC-
+df_major <- hsskin.ST@meta.data %>%
+  filter(!is.na(SnC_binary) & !is.na(cell_type_major)) %>%
+  group_by(SnC_binary, cell_type_major) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  group_by(SnC_binary) %>%
+  mutate(Proportion = Count / sum(Count))
+
+# Plot 100% stacked bar chart
+ggplot(df_major, aes(x = SnC_binary, y = Proportion, fill = cell_type_major)) +
+  geom_col(color = "black", width = 0.6) +
+  scale_y_continuous(labels = percent_format()) +
+  theme_classic(base_size = 14) +
+  labs(
+    title = "Major Cell Type Composition: SnC+ vs SnC-",
+    x = "Senescence Status",
+    y = "Proportion of Cells",
+    fill = "Major Cell Type"
+  )
+```
+
+
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(scales)
+
+# Calculate proportions of major cell types within SnC+ and SnC-
+df_major <- hsskin.ST@meta.data %>%
+  filter(!is.na(SnC_binary) & !is.na(cell_type_minor)) %>%
+  group_by(SnC_binary, cell_type_minor) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  group_by(SnC_binary) %>%
+  mutate(Proportion = Count / sum(Count))
+
+# Plot 100% stacked bar chart
+ggplot(df_major, aes(x = SnC_binary, y = Proportion, fill = cell_type_minor)) +
+  geom_col(color = "black", width = 0.6) +
+  scale_y_continuous(labels = percent_format()) +
+  theme_classic(base_size = 14) +
+  labs(
+    title = "Minor Cell Type Composition: SnC+ vs SnC-",
+    x = "Senescence Status",
+    y = "Proportion of Cells",
+    fill = "Major Cell Type"
+  )
+```
+
+```{r}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(patchwork)
+
+# 1. Plot UMAPs: Seurat Clusters vs. SnC Phenotype
+# (Assuming your clusters are stored in 'seurat_clusters' or 'cell_type_major')
+cluster_col <- "SCT_snn_res.0.3" # Change this to "cell_type_major" if you prefer
+cluster_col <- "cell_type_final"
+
+p_umap_cluster <- DimPlot(hsskin.ST, reduction = "umap", group.by = cluster_col, label = TRUE, pt.size = 0.5) + 
+  ggtitle("Transcriptomic Clusters") + theme(legend.position = "none")
+
+p_umap_snc <- DimPlot(hsskin.ST, reduction = "umap", group.by = "snc", 
+                      cols = c("SnC-" = "gray80", "SnC+" = "#cc0b01"), pt.size = 0.5) + 
+  ggtitle("Senescent Cells (SnC+)")
+
+# Display UMAPs
+print(p_umap_cluster | p_umap_snc)
+
+# 2. Calculate SnC fraction per cluster
+df_cluster_snc <- hsskin.ST@meta.data %>%
+  filter(!is.na(!!sym(cluster_col)) & !is.na(snc)) %>%
+  group_by(!!sym(cluster_col)) %>%
+  summarise(
+    total_cells = n(),
+    snc_cells = sum(snc == "SnC+"),
+    snc_fraction = snc_cells / total_cells,
+    .groups = "drop"
+  ) %>%
+  arrange(desc(snc_fraction))
+
+
+p_enrich <- ggplot(df_cluster_snc, aes(x = snc_fraction, y = reorder(!!sym(cluster_col), snc_fraction))) +
+  geom_col(fill = "#296d9e", color = "black", width = 0.7) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 0.1)) +
+  theme_classic(base_size = 14) +
+  theme(axis.text.y = element_text(face = "bold")) + # Updated theme for y-axis text
+  labs(x = "% SnC+ Cells", y = "Cluster", title = "SnC Burden by Cluster")
+
+print(p_enrich)
+
+ggsave("results/xenium_snc_burden.pdf", plot = p_enrich, width = 3.6, height = 5, dpi = 500)
+
+
+# Programmatically get the name of the cluster with the highest SnC fraction
+top_snc_cluster <- as.character(df_cluster_snc[[cluster_col]][1])
+cat("Finding markers for the top SnC+ cluster:", top_snc_cluster, "\n")
+
+Idents(hsskin.ST) <- cluster_col
+
+top_cluster_degs <- FindMarkers(
+  hsskin.ST,
+  ident.1 = top_snc_cluster,
+  only.pos = TRUE,
+  min.pct = 0.1,
+  logfc.threshold = 0.1
+)
+
+# View top 10 genes defining this cluster
+head(top_cluster_degs, 10)
+
+# 1. Create a hybrid identity column: "Cluster_Phenotype"
+hsskin.ST$cluster_snc <- paste0(hsskin.ST@meta.data[[cluster_col]], "_", hsskin.ST$snc)
+Idents(hsskin.ST) <- "cluster_snc"
+
+# 2. Define the two groups to compare
+ident_snc_plus  <- paste0(top_snc_cluster, "_SnC+")
+ident_snc_minus <- paste0(top_snc_cluster, "_SnC-")
+
+# 3. Find DEGs driven by the senescence state, controlling for cell type
+snc_specific_degs <- FindMarkers(
+  hsskin.ST,
+  ident.1 = ident_snc_plus,
+  ident.2 = ident_snc_minus,
+  min.pct = 0.1,
+  logfc.threshold = 0.1
+)
+
+# Sort by lowest adjusted p-value and view
+snc_specific_degs <- snc_specific_degs[order(snc_specific_degs$p_val_adj), ]
+head(snc_specific_degs, 10)
+
+# Optional: Visualize the top DEG
+top_gene <- rownames(snc_specific_degs)[1]
+VlnPlot(hsskin.ST, features = top_gene, idents = c(ident_snc_plus, ident_snc_minus))
+
+DimPlot(
+  hsskin.ST, 
+  reduction = "umap", 
+  group.by = "cell_type_major", 
+  label = TRUE, 
+  repel = TRUE,
+  pt.size = 0.5
+) + 
+  ggtitle("Annotated Cell Types") +
+  theme(legend.position = "none") # Hiding the legend since labels are on the plot
+
+```
+
+
+```{r}
+Idents(hsskin.ST) <- cluster_col 
+
+# 2. Find positive markers for every cluster compared to all other cells
+all_cluster_markers <- FindAllMarkers(
+  hsskin.ST,
+  only.pos = TRUE,         # Only find upregulated genes
+  min.pct = 0.1,           # Gene must be expressed in at least 10% of cells in the cluster
+  logfc.threshold = 0.1    # Lower threshold for targeted Xenium data
+)
+
+# 3. Group by cluster and extract the top 5 genes per cluster
+top5_per_cluster <- all_cluster_markers %>%
+  group_by(cluster) %>%
+  slice_max(n = 5, order_by = avg_log2FC) %>%
+  ungroup()
+
+# View the results in the console
+print(top5_per_cluster[, c("cluster", "gene", "avg_log2FC", "p_val_adj")])
+
+hsskin.ST <- ScaleData(hsskin.ST, features = rownames(hsskin.ST))
+
+# 4. Visualize the top 5 genes across all clusters using a Heatmap
+p_heatmap <- DoHeatmap(hsskin.ST, features = top5_per_cluster$gene) + 
+  theme(axis.text.y = element_text(size = 8)) +
+  ggtitle("Top 5 DEGs per Cluster")
+
+print(p_heatmap)
+
+p_dotplot <- DotPlot(hsskin.ST, features = unique(top5_per_cluster$gene)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  ggtitle("Top 5 DEGs per Cluster")
+
+print(p_dotplot)
+
+library(dplyr)
+library(ggplot2)
+
+# 1. Define the exact clusters you want to focus on (as characters)
+target_clusters <- c("5", "6", "2", "3")
+target_clusters <- c("M2 Macrophages", "CD4+ Naive T Cells", "CD8+ Exhausted T Cells", "Corneocytes", "Hair Follicles")
+
+# 2. Filter your previously calculated top 5 list to ONLY these clusters
+filtered_top5 <- top5_per_cluster %>%
+  filter(cluster %in% target_clusters)
+
+# 3. Extract the unique gene names for the plot
+target_genes <- unique(filtered_top5$gene)
+
+ordered_idents <- factor(target_clusters, levels = c("5", "6", "2", "3"))
+ordered_idents <- factor(target_clusters, levels = c("M2 Macrophages", "CD4+ Naive T Cells", "CD8+ Exhausted T Cells", "Corneocytes", "Hair Follicles"))
+
+# 3. Generate the DotPlot using the pre-ordered factor
+p_dotplot_sub <- DotPlot(
+  hsskin.ST, 
+  features = target_genes, 
+  idents = ordered_idents
+) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  labs(y = "Cluster", title = "Top 5 DEGs by Clusters")+ scale_y_discrete(limits = c("M2 Macrophages", "CD4+ Naive T Cells", "CD8+ Exhausted T Cells", "Corneocytes", "Hair Follicles")) +
+  scale_color_gradientn(
+    colours = c("lightgrey", "#9ecae1", "#3182bd", "#08519c")
+  )
+
+print(p_dotplot_sub)
+
+ggsave("results/xenium_snc_deg_celltypefinal.pdf", plot = p_dotplot_sub, width = 7, height = 5, dpi = 500)
+
+
+# ---------------------------------------------------------
+# OPTION B: The Subsetted Heatmap
+# ---------------------------------------------------------
+# For a heatmap, the safest way to drop the other clusters from the X-axis 
+# is to temporarily subset the Seurat object inside the plotting function.
+# (Make sure you ran ScaleData(hsskin.ST, features = target_genes) previously!)
+
+p_heatmap_sub <- DoHeatmap(
+  subset(hsskin.ST, idents = target_clusters), 
+  features = target_genes
+) + 
+  theme(axis.text.y = element_text(size = 8)) +
+  ggtitle("Top 5 DEGs: Clusters 5, 4, 3, 9, 15")
+
+print(p_heatmap_sub)
+```
+
+
+
+
+
+
+
+
