@@ -1,0 +1,793 @@
+---
+title: "Lipidomics signature of aging"
+output: html_notebook
+---
+
+Reading in lipid 
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+### DOESN't WORK
+#From Seurat to h5ad
+library(Seurat)
+library(SeuratData)
+library(SeuratDisk)
+library(dplyr)
+setwd('//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/skin_mapping')
+a <- readRDS('GSE130973_seurat_analysis_lyko.rds')
+a <- readRDS('Data/codex.rds')
+
+r$coord1 <- combined$coord1
+r$coord2 <- combined$coord2
+
+
+a<- UpdateSeuratObject(a)
+
+seurat_object_new <- r
+
+seurat_object_new[["RNA"]] <- as(object = seurat_object_new[["RNA"]], Class = "Assay")
+
+SeuratDisk::SaveH5Seurat(seurat_object_new, "seurat_object_new.h5Seurat")
+
+SeuratDisk::Convert("seurat_object_new.h5Seurat", dest = "h5ad")
+
+
+SaveH5Seurat(a, filename = "a.h5Seurat")
+Convert("a.h5Seurat", dest = "h5ad")
+
+#From h5ad to Seurat
+devtools::install_github("rstudio/promises")
+remotes::install_github("mojaveazure/seurat-disk", force=TRUE)
+
+library(reticulate)
+library(Seurat)
+library(SeuratDisk)
+library(anndata)
+
+data <- read_h5ad("2_adata.h5ad")
+Convert("2_adata.h5ad", dest = "h5seurat", overwrite = TRUE)
+pbmc3k <- LoadH5Seurat("pbmc3k_final.h5seurat")
+pbmc3k
+
+b <- 
+  
+  2_adata.h5ad
+
+knitr root.dir
+
+setwd('C:/Users/m305269/Downloads')
+
+#### DOESN'T WORK
+Convert("Skin_TSP1_30_version2d_10X_smartseq_scvi_Nov122024_updated.h5ad", dest = "h5seurat", overwrite = TRUE)
+pbmc3k <- LoadH5Seurat("Skin_TSP1_30_version2d_10X_smartseq_scvi_Nov122024_updated.h5seurat", meta.data = FALSE, misc=FALSE)
+
+#### DOESN'T WORK
+library("anndata")
+data <- read_h5ad("Skin_TSP1_30_version2d_10X_smartseq_scvi_Nov122024_updated.h5ad")
+
+
+
+
+```
+```{r xenium analysis}
+library(readxl)
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(cowplot)
+library(ggpubr)
+
+setwd('//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/250307')
+
+saveRDS(adata_Seurat, file = "xenium.rds")
+x <- readRDS("//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/250319/xenium.rds")
+
+load('//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/250319/250312.RData')
+save.image('//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/250319/250312.RData')
+
+
+BiocManager::install("zellkonverter")
+library("zellkonverter")
+ad <- readH5AD("fil_adata.h5ad")
+adata_Seurat <- as.Seurat(ad, counts = "X", data = NULL)
+
+adata_Seurat@assays$RNA <- adata_Seurat@assays$originalexp
+
+DefaultAssay(object = adata_Seurat) <- "RNA"
+
+adata_Seurat@assays$originalexp <- NULL
+
+
+CD45 <- adata_Seurat@assays$RNA$counts["PTPRC",] > 0.0
+CD4 <- adata_Seurat@assays$RNA$counts["CD4",] > 0.0
+CD11C <- adata_Seurat@assays$RNA$counts["ITGAX",] > 0.0
+CD14 <- adata_Seurat@assays$RNA$counts["CD14",] > 0.0
+FOXP3 <- adata_Seurat@assays$RNA$counts["FOXP3",] > 0.0
+CXCR3 <- adata_Seurat@assays$RNA$counts["CXCR3",] > 0.0
+CCR2 <- adata_Seurat@assays$RNA$counts["CCR2",] > 0.0
+CD163 <- adata_Seurat@assays$RNA$counts["CD163",] > 0.0
+CD80 <- adata_Seurat@assays$RNA$counts["CD80",] > 0.0
+CD86 <- adata_Seurat@assays$RNA$counts["CD86",] > 0.0
+TREM2 <- adata_Seurat@assays$RNA$counts["TREM2",] > 0.0
+BATF3 <- adata_Seurat@assays$RNA$counts["BATF3",] > 0.0
+IRF8 <- adata_Seurat@assays$RNA$counts["IRF8",] > 0.0
+CD1C <- adata_Seurat@assays$RNA$counts["CD1C",] > 0.0
+CD1A <- adata_Seurat@assays$RNA$counts["CD1A",] > 0.0
+CD207 <- adata_Seurat@assays$RNA$counts["CD207",] > 0.0
+PRF <- adata_Seurat@assays$RNA$counts["PRF1",] > 0.0
+GZMB <- adata_Seurat@assays$RNA$counts["GZMB",] > 0.0
+NKG7 <- adata_Seurat@assays$RNA$counts["NKG7",] > 0.0
+GNLY <- adata_Seurat@assays$RNA$counts["GNLY",] > 0.0
+CD28 <- adata_Seurat@assays$RNA$counts["CD28",] > 0.0
+GZMK <- adata_Seurat@assays$RNA$counts["GZMK",] > 0.0
+MKI67 <- adata_Seurat@assays$RNA$counts["MKI67",] > 0.0
+CD3E <- adata_Seurat@assays$RNA$counts["CD3E",] > 0.0
+CD8A <- adata_Seurat@assays$RNA$counts["CD8A",] > 0.0
+CCR7 <- adata_Seurat@assays$RNA$counts["CCR7",] > 0.0
+TCF7 <- adata_Seurat@assays$RNA$counts["TCF7",] > 0.0
+PDCD1 <- adata_Seurat@assays$RNA$counts["PDCD1",] > 0.0
+TBX21 <- adata_Seurat@assays$RNA$counts["TBX21",] > 0.0
+GATA3 <- adata_Seurat@assays$RNA$counts["GATA3",] > 0.0
+RORC <- adata_Seurat@assays$RNA$counts["RORC",] > 0.0
+CXCR5 <- adata_Seurat@assays$RNA$counts["CXCR5",] > 0.0
+CD19 <- adata_Seurat@assays$RNA$counts["CD19",] > 0.0
+CD40 <- adata_Seurat@assays$RNA$counts["CD40",] > 0.0
+CD27 <- adata_Seurat@assays$RNA$counts["CD27",] > 0.0
+IGHG1 <- adata_Seurat@assays$RNA$counts["IGHG1",] > 0.0
+IGHG2 <- adata_Seurat@assays$RNA$counts["IGHG2",] > 0.0
+IGHG3 <- adata_Seurat@assays$RNA$counts["IGHG3",] > 0.0
+IGHG4 <- adata_Seurat@assays$RNA$counts["IGHG4",] > 0.0
+IGHM <- adata_Seurat@assays$RNA$counts["IGHM",] > 0.0
+CD68 <- adata_Seurat@assays$RNA$counts["CD68",] > 0.0
+ENTPD1 <- adata_Seurat@assays$RNA$counts["ENTPD1",] > 0.0
+HAVCR2 <- adata_Seurat@assays$RNA$counts["HAVCR2",] > 0.0
+LAG3 <- adata_Seurat@assays$RNA$counts["LAG3",] > 0.0
+CTLA4 <- adata_Seurat@assays$RNA$counts["CTLA4",] > 0.0
+CD56 <- adata_Seurat@assays$RNA$counts["NCAM1",] > 0.0
+
+p16 <- adata_Seurat@assays$RNA$counts["CDKN2A",] > 0.0
+p21 <- adata_Seurat@assays$RNA$counts["CDKN1A",] > 0.0
+
+adata_Seurat@meta.data$sencelltype <- case_when(
+  p16 & p21 ~ "p16+/p21+",
+  p16 ~ "p16+",
+  p21 ~ "p21+",
+  
+  TRUE ~ "p16-/p21-" # Default classification
+)
+
+pcna <- adata_Seurat@assays$RNA$counts["PCNA",] > 0.0
+ki67 <- adata_Seurat@assays$RNA$counts["MKI67",] > 0.0
+
+adata_Seurat@meta.data$pcna <- case_when(
+  pcna ~ "pos",
+  TRUE ~ "neg" # Default classification
+)
+
+adata_Seurat@meta.data$ki67 <- case_when(
+  ki67 ~ "pos",
+  TRUE ~ "neg" # Default classification
+)
+
+#deleting all cell types where there are less than 5 cells in either age group
+adata_Seurat@meta.data$immcelltype2 <- case_when(
+
+  CD45 & CD3E & CD8A & !FOXP3 & PDCD1 ~ "CD8+ exhausted T cell", # Exhausted CD8+ T cell
+  CD45 & CD3E & CD8A & TCF7 & CD28 ~ "CD8+ stem-like T cell", # Stem-like CD8+ T cell
+  CD45 & CD3E & CD8A & PRF ~ "CD8+ PRF+ T cell", # Classical cytotoxic CD8+ T cell
+  CD45 & CD3E & CD8A & GZMB ~ "CD8+ GZMB+ T cell", # Classical cytotoxic CD8+ T cell
+  CD45 & CD3E & CD8A & NKG7 ~ "CD8+ NKG7+ T cell", # Other classical CD8+ T cell
+  CD45 & CD3E & CD8A & CCR7 ~ "CD8+ CCR7+ T cell", # Peripheral CD8+ T cell
+  CD45 & CD3E & CD8A & !CD28 ~ "TERMA T cell", # Immunosenescent CD8+ T cell
+  CD45 & CD3E & CD8A & GZMK ~ "CD8+ GZMK+ T cell", # Age-associated CD8+ T cell
+  CD45 & CD3E & CD8A ~ "CD8+ T cell", # CD8+ T cell
+  
+  CD45 & CD3E & CD4 & !FOXP3 & PDCD1 ~ "CD4+ exhausted T cell", # Exhausted CD4+ T cell
+  CD45 & CD3E & CD4 & FOXP3 ~ "CD4+ FOXP3+ T cell", # Suppressive Treg CD4+ T cell
+  CD45 & CD3E & CD4 & TBX21 & CXCR3 ~ "CD4+ Th1 inflammatory T cell", # Inflammatory Th1 CD4+ T cell
+  CD45 & CD3E & CD4 & GATA3 ~ "CD4+ Th2 T cell", # Th2 CD4+ T cell
+  CD45 & CD3E & CD4 & RORC ~ "CD4+ Th17 T cell", # Th17 CD4+ T cell
+  CD45 & CD3E & CD4 & TCF7 & CD28 ~ "CD4+ stem-like T cell", # Stem-like CD4+ T cell
+  CD45 & CD3E & CD4 & CCR7 ~ "CD4+ CCR7+ T cell", # Peripheral CD4+ T cell
+  CD45 & CD3E & CD4 & PRF ~ "CD4+ PRF+ T cell", # Classical cytotoxic CD4+ T cell
+  CD45 & CD3E & CD4 & GZMB ~ "CD45+ CD4+ GZMB+", # Classical cytotoxic CD4+ T cell
+  CD45 & CD3E & CD4 & MKI67 ~ "CD4+ Ki67+ T cell", # CD4+ proliferating T cell
+  CD45 & CD3E & CD4 ~ "CD4+", # CD4+ T cell
+
+  CD45 & CD3E & !CD4 & !CD8A ~ "Double negative T cell", # Double negative T cell
+  
+
+  CD45 & CD56 & !CD3E & !CD4 ~ "NK cell", # NK cell
+
+  CD45 & CD19 ~ "B cell", # B cell
+
+  CD45 & CD68 & CD163 ~ "CD45+ CD68+ CD163+", # M2 myeloid macrophage
+  CD45 & CD68 & CD86 ~ "CD68+ CD86+", # Co-stimulatory myeloid macrophage
+  CD45 & CD68 & TREM2 ~ "CD45+ CD68+ TREM2+", # Disease-associated myeloid macrophage
+  CD45 & CD68 ~ "CD68+", # Myeloid macrophage
+  CD45 & CD14 ~ "CD14+", # Monocyte
+  CD45 & CD11C & CD1A & CD207 ~ "CD11C+ CD1A+ CD207+", # Langerhans
+  CD45 & CD11C & BATF3 ~ "CD11C+ BATF3+", # cDC1
+  CD45 & CD11C & IRF8 ~ "CD11C+ IRF8+", # cDC1
+  CD45 & CD11C & CD1C ~ "CD11C+ CD1C+", # cDC2 or moDC
+  CD45 & CD11C ~ "CD11C+", # Dendritic cells or macrophages
+  CD45 & CCR2 ~ "CD45+ CCR2+", # Infiltrating cells
+  
+  CD45 ~ "CD45+", # General immune cells
+  TRUE ~ "none" # Default classification
+)
+
+
+adata_Seurat@meta.data$immcelltype <- case_when(
+  
+  CD45 & CD3E & CD8A & !FOXP3 & PDCD1 & ENTPD1 ~ "CD45+ CD8+ exhausted ENTPD1+", # Exhausted CD8+ T cell
+  CD45 & CD3E & CD8A & !FOXP3 & PDCD1 & HAVCR2 ~ "CD45+ CD8+ exhausted HAVCR2+", # Exhausted CD8+ T cell
+  CD45 & CD3E & CD8A & !FOXP3 & PDCD1 & LAG3 ~ "CD45+ CD8+ exhausted LAG3+", # Exhausted CD8+ T cell
+  CD45 & CD3E & CD8A & !FOXP3 & PDCD1 & CTLA4 ~ "CD45+ CD8+ exhausted CTLA4+", # Exhausted CD8+ T cell
+  CD45 & CD3E & CD8A & !FOXP3 & PDCD1 ~ "CD45+ CD8+ exhausted", # Exhausted CD8+ T cell
+  CD45 & CD3E & CD8A & TCF7 & CD28 ~ "CD45+ CD8+ stem-like", # Stem-like CD8+ T cell
+  CD45 & CD3E & CD8A & PRF ~ "CD45+ CD8+ PRF+", # Classical cytotoxic CD8+ T cell
+  CD45 & CD3E & CD8A & GZMB ~ "CD45+ CD8+ GZMB+", # Classical cytotoxic CD8+ T cell
+  CD45 & CD3E & CD8A & NKG7 ~ "CD45+ CD8+ NKG7+", # Other classical CD8+ T cell
+  CD45 & CD3E & CD8A & GNLY ~ "CD45+ CD8+ GNLY+", # Other classical CD8+ T cell
+  CD45 & CD3E & CD8A & CCR7 ~ "CD45+ CD8+ CCR7+", # Peripheral CD8+ T cell
+  CD45 & CD3E & CD8A & !CD28 ~ "CD45+ CD8+ immunosenescent", # Immunosenescent CD8+ T cell
+  CD45 & CD3E & CD8A & GZMK ~ "CD45+ CD8+ GZMK+", # Age-associated CD8+ T cell
+  CD45 & CD3E & CD8A & MKI67 ~ "CD45+ CD8+ Ki67+", # CD8+ proliferating T cell
+  CD45 & CD3E & CD8A ~ "CD45+ CD8+", # CD8+ T cell
+  
+  CD45 & CD3E & CD4 & !FOXP3 & PDCD1 & ENTPD1 ~ "CD45+ CD4+ exhausted ENTPD1+", # Exhausted CD4+ T cell
+  CD45 & CD3E & CD4 & !FOXP3 & PDCD1 & HAVCR2 ~ "CD45+ CD4+ exhausted HAVCR2+", # Exhausted CD4+ T cell
+  CD45 & CD3E & CD4 & !FOXP3 & PDCD1 & LAG3 ~ "CD45+ CD4+ exhausted LAG3+", # Exhausted CD4+ T cell
+  CD45 & CD3E & CD4 & !FOXP3 & PDCD1 & CTLA4 ~ "CD45+ CD4+ exhausted CTLA4+", # Exhausted CD4+ T cell
+  CD45 & CD3E & CD4 & !FOXP3 & PDCD1 ~ "CD45+ CD4+ exhausted", # Exhausted CD4+ T cell
+  CD45 & CD3E & CD4 & FOXP3 ~ "CD45+ CD4+ FOXP3+", # Suppressive Treg CD4+ T cell
+  CD45 & CD3E & CD4 & TBX21 & CXCR3 ~ "CD45+ CD4+ Th1 inflammatory", # Inflammatory Th1 CD4+ T cell
+  CD45 & CD3E & CD4 & GATA3 ~ "CD45+ CD4+ Th2", # Th2 CD4+ T cell
+  CD45 & CD3E & CD4 & RORC ~ "CD45+ CD4+ Th17", # Th17 CD4+ T cell
+  CD45 & CD3E & CD4 & CXCR5 ~ "CD45+ CD4+ Tfh", # T follicular helper CD4+ T cell
+  CD45 & CD3E & CD4 & TCF7 & CD28 ~ "CD45+ CD4+ stem-like", # Stem-like CD4+ T cell
+  CD45 & CD3E & CD4 & CCR7 ~ "CD45+ CD4+ CCR7+", # Peripheral CD4+ T cell
+  CD45 & CD3E & CD4 & PRF ~ "CD45+ CD4+ PRF+", # Classical cytotoxic CD4+ T cell
+  CD45 & CD3E & CD4 & GZMB ~ "CD45+ CD4+ GZMB+", # Classical cytotoxic CD4+ T cell
+  CD45 & CD3E & CD4 & MKI67 ~ "CD45+ CD4+ Ki67+", # CD4+ proliferating T cell
+  CD45 & CD3E & CD4 ~ "CD45+ CD4+", # CD4+ T cell
+
+  CD45 & CD3E & !CD4 & !CD8A ~ "CD45+ Double negative T cell", # Double negative T cell
+  
+  CD45 & CD56 & !CD3E & !CD4 & PRF ~ "CD45+ Cytotoxic NK cell PRF+", # Cytotoxic NK cell
+  CD45 & CD56 & !CD3E & !CD4 & GZMB ~ "CD45+ Cytotoxic NK cell GZMB+", # Cytotoxic NK cell
+  CD45 & CD56 & !CD3E & !CD4 & NKG7 ~ "CD45+ Cytotoxic NK cell NKG7+", # Other cytotoxic NK cell
+  CD45 & CD56 & !CD3E & !CD4 & GNLY ~ "CD45+ Cytotoxic NK cell GNLY+", # Other cytotoxic NK cell
+  CD45 & CD56 & !CD3E & !CD4 ~ "CD45+ NK cell", # NK cell
+  
+  CD45 & CD19 & IGHG1 ~ "CD45+ B cell IgG1+", # IgG producing B cell
+  CD45 & CD19 & IGHG2 ~ "CD45+ B cell IgG2+", # IgG producing B cell
+  CD45 & CD19 & IGHG3 ~ "CD45+ B cell IgG3+", # IgG producing B cell
+  CD45 & CD19 & IGHM ~ "CD45+ B cell IgM+", # IgM producing B cell
+  CD45 & CD19 & CD27 ~ "CD45+ B cell CD27+", # Memory B cell
+  CD45 & CD19 & CD40 ~ "CD45+ B cell CD40+", # CD40 B cell
+  CD45 & CD19 & CXCR5 ~ "CD45+ B cell CXCR5+", # Germinal center B cell
+  CD45 & CD19 ~ "CD45+ B cell", # B cell
+
+  CD45 & CD68 & CD163 ~ "CD45+ CD68+ CD163+", # M2 myeloid macrophage
+  CD45 & CD68 & CD80 ~ "CD45+ CD68+ CD80+", # Co-stimulatory myeloid macrophage
+  CD45 & CD68 & CD86 ~ "CD45+ CD68+ CD86+", # Co-stimulatory myeloid macrophage
+  CD45 & CD68 & TREM2 ~ "CD45+ CD68+ TREM2+", # Disease-associated myeloid macrophage
+  CD45 & CD68 ~ "CD45+ CD68+", # Myeloid macrophage
+  CD45 & CD14 ~ "CD45+ CD14+", # Monocyte
+  CD45 & CD11C & CD1A & CD207 ~ "CD45+ CD11C+ CD1A+ CD207+", # Langerhans
+  CD45 & CD11C & BATF3 ~ "CD45+ CD11C+ BATF3+", # cDC1
+  CD45 & CD11C & IRF8 ~ "CD45+ CD11C+ IRF8+", # cDC1
+  CD45 & CD11C & CD1C ~ "CD45+ CD11C+ CD1C+", # cDC2 or moDC
+  CD45 & CD11C ~ "CD45+ CD11C+", # Dendritic cells or macrophages
+  CD45 & CCR2 ~ "CD45+ CCR2+", # Infiltrating cells
+  
+  CD45 ~ "CD45+", # General immune cells
+  TRUE ~ "none" # Default classification
+)
+
+#deleting all cell types where there are less than 5 cells in either age group
+adata_Seurat@meta.data$immcelltype2 <- case_when(
+
+  CD45 & CD3E & CD8A & !FOXP3 & PDCD1 ~ "CD8+ exhausted T cell", # Exhausted CD8+ T cell
+  CD45 & CD3E & CD8A & TCF7 & CD28 ~ "CD8+ stem-like T cell", # Stem-like CD8+ T cell
+  CD45 & CD3E & CD8A & PRF ~ "CD8+ PRF+ T cell", # Classical cytotoxic CD8+ T cell
+  CD45 & CD3E & CD8A & GZMB ~ "CD8+ GZMB+ T cell", # Classical cytotoxic CD8+ T cell
+  CD45 & CD3E & CD8A & NKG7 ~ "CD8+ NKG7+ T cell", # Other classical CD8+ T cell
+  CD45 & CD3E & CD8A & CCR7 ~ "CD8+ CCR7+ T cell", # Peripheral CD8+ T cell
+  CD45 & CD3E & CD8A & !CD28 ~ "TERMA T cell", # Immunosenescent CD8+ T cell
+  CD45 & CD3E & CD8A & GZMK ~ "CD8+ GZMK+ T cell", # Age-associated CD8+ T cell
+  CD45 & CD3E & CD8A ~ "CD8+ T cell", # CD8+ T cell
+  
+  CD45 & CD3E & CD4 & !FOXP3 & PDCD1 ~ "CD4+ exhausted T cell", # Exhausted CD4+ T cell
+  CD45 & CD3E & CD4 & FOXP3 ~ "CD4+ FOXP3+ T cell", # Suppressive Treg CD4+ T cell
+  CD45 & CD3E & CD4 & TBX21 & CXCR3 ~ "CD4+ Th1 inflammatory T cell", # Inflammatory Th1 CD4+ T cell
+  CD45 & CD3E & CD4 & GATA3 ~ "CD4+ Th2 T cell", # Th2 CD4+ T cell
+  CD45 & CD3E & CD4 & RORC ~ "CD4+ Th17 T cell", # Th17 CD4+ T cell
+  CD45 & CD3E & CD4 & TCF7 & CD28 ~ "CD4+ stem-like T cell", # Stem-like CD4+ T cell
+  CD45 & CD3E & CD4 & CCR7 ~ "CD4+ CCR7+ T cell", # Peripheral CD4+ T cell
+  CD45 & CD3E & CD4 & PRF ~ "CD4+ PRF+ T cell", # Classical cytotoxic CD4+ T cell
+  CD45 & CD3E & CD4 & GZMB ~ "CD45+ CD4+ GZMB+", # Classical cytotoxic CD4+ T cell
+  CD45 & CD3E & CD4 & MKI67 ~ "CD4+ Ki67+ T cell", # CD4+ proliferating T cell
+  CD45 & CD3E & CD4 ~ "CD4+", # CD4+ T cell
+
+  CD45 & CD3E & !CD4 & !CD8A ~ "Double negative T cell", # Double negative T cell
+  
+
+  CD45 & CD56 & !CD3E & !CD4 ~ "NK cell", # NK cell
+
+  CD45 & CD19 ~ "B cell", # B cell
+
+  CD45 & CD68 & CD163 ~ "CD45+ CD68+ CD163+", # M2 myeloid macrophage
+  CD45 & CD68 & CD86 ~ "CD68+ CD86+", # Co-stimulatory myeloid macrophage
+  CD45 & CD68 & TREM2 ~ "CD45+ CD68+ TREM2+", # Disease-associated myeloid macrophage
+  CD45 & CD68 ~ "CD68+", # Myeloid macrophage
+  CD45 & CD14 ~ "CD14+", # Monocyte
+  CD45 & CD11C & CD1A & CD207 ~ "CD11C+ CD1A+ CD207+", # Langerhans
+  CD45 & CD11C & BATF3 ~ "CD11C+ BATF3+", # cDC1
+  CD45 & CD11C & IRF8 ~ "CD11C+ IRF8+", # cDC1
+  CD45 & CD11C & CD1C ~ "CD11C+ CD1C+", # cDC2 or moDC
+  CD45 & CD11C ~ "CD11C+", # Dendritic cells or macrophages
+  CD45 & CCR2 ~ "CD45+ CCR2+", # Infiltrating cells
+  
+  CD45 ~ "CD45+", # General immune cells
+  TRUE ~ "none" # Default classification
+)
+
+adata_Seurat@meta.data$immcelltype3 <- case_when(
+  CD45 & CD3E & CD8A ~ "CD8+ T cell", # CD8+ T cell
+
+  CD45 & CD3E & CD4 ~ "CD4+ T cell", # CD4+ T cell
+
+  CD45 & CD56 & !CD3E & !CD4 ~ "NK cell", # NK cell
+
+  CD45 & CD19 ~ "B cell", # B cell
+
+  CD45 & CD68 ~ "Myeloid macrophage", # Myeloid macrophage
+  CD45 & CD14 ~ "Monocyte", # Monocyte
+  CD45 & CD11C & CD1A & CD207 ~ "Langerhans", # Langerhans
+  CD45 & CD11C ~ "Dentric cell", # Dendritic cells or macrophages
+  CD45 & CCR2 ~ "Infiltrating cell", # Infiltrating cells
+  
+  CD45 ~ "CD45+", # General immune cells
+  TRUE ~ "none" # Default classification
+)
+
+adata_Seurat@meta.data$codex_immcell <- case_when(
+  CD45 ~ "CD45+",
+  CD4 & FOXP3 ~ "CD4+ FOXP3+",
+  CD4 & CXCR3 ~ "CD4+ CXCR3+",
+  CD4 ~ "CD4+",
+  CD11C ~ "CD11c+",
+  CD14 ~ "CD14+",
+  CD8A ~ "CD8+",
+  CD68 ~ "CD68+",
+  TRUE ~ 'none'
+)
+
+
+adata_Seurat$young_or_old <- factor(tolower(adata_Seurat$young_or_old), levels = c("young", "old"))
+
+
+# Identify cell types that contain 'exhausted' in their names
+adata_Seurat$exhausted <- ifelse(grepl("exhausted", adata_Seurat$immcelltype, ignore.case = TRUE), "exhausted", "not exhausted")
+
+adata_Seurat$exhausted <- ifelse(grepl("exhausted", adata_Seurat$immcelltype, ignore.case = TRUE), 
+                                               "exhausted T cells",
+                                        ifelse(grepl("CD8+|CD4+", adata_Seurat$immcelltype, ignore.case = TRUE), 
+                                               "non-exhausted T cells", 
+                                               "none"))
+
+
+f <- c("CDKN2A", "CDKN1A", "MKI67", "PCNA", "HMGB1", "CXCR3", "IP10", "IL6", "IL8")
+f <- c("CDKN2A", "CDKN1A")
+
+
+Idents(adata_Seurat) <- 'exhausted'
+
+Idents()
+
+DotPlot(adata_Seurat, features = f, dot.scale=10, dot.min = 0.01 , scale=TRUE)+scale_colour_gradient2(low="#006699", mid="#D9D9D9", high="#CC0000")+theme(axis.text.y=element_text(size=14), axis.title = element_blank(), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=14), axis.line = element_blank())+geom_point(aes(size=pct.exp), shape = 21, colour="black", stroke=0.5)+scale_y_discrete(limits=rev)
+
+ggsave(filename = "xen_dot.svg", device = "svg", width=8, height=4, dpi=1000)  # Works fine
+ggsave(filename = "xen_dot1.svg", device = "svg", width=8, height=4, dpi=1000)  # Works fine
+
+
+
+table(adata_Seurat$young_or_old, adata_Seurat$immcelltype2)
+table(adata_Seurat$young_or_old, adata_Seurat$immcelltype2)
+
+
+seurat <- subset(adata_Seurat, subset=young_or_old== 'old')
+seurat <- subset(adata_Seurat, subset=young_or_old== 'young')
+
+
+adata_Seurat$p21 <- adata_Seurat@assays$RNA$counts["CDKN1A",] > 0.0
+adata_Seurat$p16 <- adata_Seurat@assays$RNA$counts["CDKN2A",] > 0.0
+
+
+mycols <- c("#3156a6", "#cd8729")
+
+skinsen <- as.data.frame(table(seurat$codex_immcell, seurat$ki67))
+
+your_data <- as.data.frame(skinsen %>%
+                             group_by(Var1) %>%
+                             mutate(Freq = Freq / sum(Freq)))
+
+colnames(your_data) <- c('cell_types', 'ki67', 'Freq')
+
+your_data <- your_data[your_data$cell_types != "none", ]
+
+your_data$Freq <- round(your_data$Freq * 100, 2)
+
+your_data <- your_data %>%
+  arrange(desc(cell_types)) %>%
+  group_by(cell_types) %>%
+  mutate(lab.ypos = cumsum(Freq) - 0.5 * Freq) %>%
+  ungroup()
+
+
+p <-ggplot(your_data, aes(x = "", y = Freq, group=ki67, color=ki67, fill = ki67)) +
+  geom_bar(width = 1, stat = "identity", color = "white") +
+  #coord_polar()+
+  coord_polar("y", start = 0)+
+  geom_text(aes(y = lab.ypos, label = Freq), color = "black")+
+  scale_fill_manual(values = mycols) +
+  facet_wrap(~ cell_types, ncol = 14, scales='free') +theme_void()
+
+ggsave("xen_old_codeximmpki67.png", plot = p, width = 10, height = 5, dpi = 300)
+
+
+ggsave("xen_young_codeximmp21.png", plot = p, width = 10, height = 5, dpi = 300)
+ggsave("xen_young_codeximmp16.png", plot = p, width = 10, height = 5, dpi = 300)
+ggsave("xen_old_codeximmp16.png", plot = p, width = 10, height = 5, dpi = 300)
+
+
+
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+
+# Subset for young and old
+adata_Seurat$young_or_old <- factor(adata_Seurat$young_or_old, levels = c("Young", "Old"))
+
+immsen3 <- as.data.frame(table(adata_Seurat$young_or_old, adata_Seurat$immcelltype3))
+
+cells <- as.data.frame(immsen3 %>%
+                           group_by(Var1) %>%
+                           mutate(Freq = Freq / sum(Freq)))
+cells <- cells[cells$Var2 != 'none',]
+cells <- cells[cells$Var2 != 'CD45+',]
+
+cells <- cells %>%
+  group_by(Var1) %>%
+  mutate(Percentage = round(Freq * 100, 1))  # Convert proportion to percentage
+
+# Create stacked bar plot with black borders and percentage labels
+stacked_barplot <- ggplot(cells, aes(x = Var1, y = Freq, fill = Var2)) +
+  geom_bar(stat = "identity", position = "stack", color = "black") +  # Black borders
+  geom_text(aes(label = paste0(Percentage, "%")), 
+            position = position_stack(vjust = 0.5), 
+            size = 5, color = "black") +  # Percentage labels inside bars
+  theme_minimal() +
+  labs(
+    title = "Proportion of Immune Cell Types in Old vs. Young",
+    x = "Age Group",
+    y = "Proportion",
+    fill = "Immune Cell Types"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 12)
+  )
+
+# Display the plot
+print(stacked_barplot)
+
+# 
+# library(ggplot2)
+# stacked_barplot <- ggplot(cells, aes(x = Var1, y = Freq, fill = Var2)) +
+#   geom_bar(stat = "identity", position = "stack") +
+#   theme_minimal() +
+#   labs(
+#     title = "Proportion of Immune Cell Types in Old vs. Young",
+#     x = "Age Group",
+#     y = "Proportion",
+#     fill = "Skin Cell Types"
+#   ) +
+#   theme(
+#     plot.title = element_text(hjust = 0.5, size = 16),
+#     axis.text = element_text(size = 12),
+#     axis.title = element_text(size = 14),
+#     legend.title = element_text(size = 25),
+#     legend.text = element_text(size = 22)
+#   )
+# 
+# # Display the plot
+# print(stacked_barplot)
+# 
+# 
+
+
+
+setwd('//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/250319')
+
+# Save the plot
+ggsave("big_immune_cell_types_old_vs_young.png", plot = stacked_barplot, width = 20, height = 20, dpi = 150)
+
+
+setwd('//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/250307')
+
+save.image('250312.RData')
+
+```
+
+```{r adding in spatial coordinates}
+setwd("//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/250307")
+
+sp <-  read.csv('C:/Users/m305269/Desktop/workspace/ana/xenspatial.csv')
+
+rownames(sp) <- sp$X
+sp$X <- NULL
+colnames(sp)[1:2] <- c("umap_2", "umap_1")
+
+adata_Seurat <- FindVariableFeatures(adata_Seurat)
+adata_Seurat <- NormalizeData(adata_Seurat)
+adata_Seurat <- ScaleData(adata_Seurat)
+adata_Seurat <- RunPCA(adata_Seurat,features =VariableFeatures(adata_Seurat), approx=FALSE)
+
+adata_Seurat <- FindNeighbors(adata_Seurat, dims = 1:10)
+adata_Seurat <- FindClusters(adata_Seurat, resolution = 0.5)
+
+#UMAP calculation itself will just be used as a place holder here
+adata_Seurat <- RunUMAP(adata_Seurat, reduction = "pca", n.neighbors=10, dims=1:10)
+
+#get "real" UMAP-values
+cell_embeddings <- sp[, 1:2]
+cell_embeddings <- cell_embeddings/5000 ##what does the 5000 here mean?? was 5000 but I will change to 1000
+rownames(cell_embeddings) <- rownames(adata_Seurat@meta.data) #check that the rows match!! subsetting the seurat in preprocessing can alter things
+adata_Seurat@reductions$umap@cell.embeddings <- as.matrix(cell_embeddings)
+
+##Yeaeun: look for clusters
+adata_Seurat <- FindNeighbors(adata_Seurat, dims = 1:10)
+adata_Seurat <- FindClusters(adata_Seurat, resolution = 0.5)
+
+# Count the occurrences of each cell type
+celltype_counts <- table(adata_Seurat$immcelltype2)
+
+# Order the cell types by abundance (increasing order)
+ordered_celltypes <- names(sort(celltype_counts, decreasing = FALSE))
+
+
+adata_Seurat$immcelltype2 <- factor(adata_Seurat$immcelltype2, levels = ordered_celltypes)
+
+# Convert immcelltype2 to a factor with the new order
+adata_Seurat$immcelltype2 <- factor(adata_Seurat$immcelltype2, levels = ordered_celltypes)
+
+
+# Count the occurrences of each cell type
+celltype_counts <- table(adata_Seurat$immcelltype3)
+
+# Order the cell types by abundance (increasing order)
+ordered_celltypes <- names(sort(celltype_counts, decreasing = FALSE))
+
+
+4890-O 4891-O 5138-O
+o4890 <- subset(adata_Seurat, subset=sample_id== '4890-O')
+o4891 <- subset(adata_Seurat, subset=sample_id== '4891-O')
+o5138 <- subset(adata_Seurat, subset=sample_id== '5138-O')
+
+
+Idents(o4891) <- 'immcelltype3'
+DimPlot(o4891, pt.size=1, order = ordered_celltypes) + theme(axis.title.x=element_blank(), axis.title.y=element_blank())
+ggsave(filename = "4891_immdim2.png", device = "png", width=8, height=8, dpi=1000)  # Works fine
+
+order=c("helper T cell", "cytotoxic T cell", "macrophage", "immune cell", "none"), cols = c("gray", "#FFA69E", "#B8F2E6", "#ECD072", "#2D2C2A")
+```
+
+```{r add cell types}
+
+setwd("//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/250307")
+load('250312.RData')
+
+celltypes <-  read.csv('acts_obs.csv')
+celltypes <- celltypes[, c("X", "manual_cell_type", "celltypist_cell_label")]
+
+rownames(celltypes) <- celltypes$X
+celltypes$X <- NULL
+
+adata_Seurat <- AddMetaData(
+  object = adata_Seurat,
+  metadata = celltypes,
+)
+
+
+#### combined dotplots
+BiocManager::install("ComplexHeatmap")
+
+library(ComplexHeatmap)
+
+GetMatrixFromSeuratByGroupMulti<- function(obj, features, group1, group2){
+  exp_mat<- obj@assays$RNA$data[features, ,drop=FALSE]
+  count_mat<- obj@assays$RNA$counts[features,,drop=FALSE ]
+  
+  meta<- obj@meta.data %>%
+    tibble::rownames_to_column(var = "cell")
+  
+  # get the average expression matrix        
+  exp_df<- as.matrix(exp_mat) %>% 
+    as.data.frame() %>% 
+    tibble::rownames_to_column(var="gene") %>%
+    tidyr::pivot_longer(!gene, names_to = "cell", values_to = "expression") %>%
+    left_join(meta) %>%
+    group_by(gene,{{group1}}, {{group2}}) %>%
+    summarise(average_expression = mean(expression)) %>%
+    # the trick is to make the data wider in columns: cell_type|group
+    tidyr::pivot_wider(names_from = c({{group1}}, {{group2}}), 
+                       values_from= average_expression,
+                       names_sep="|") 
+  
+  # convert to a matrix
+  exp_mat<- exp_df[, -1] %>% as.matrix()
+  rownames(exp_mat)<- exp_df$gene
+  
+  # get percentage of positive cells matrix
+  count_df<- as.matrix(count_mat) %>% 
+    as.data.frame() %>% 
+    tibble::rownames_to_column(var="gene") %>%
+    tidyr::pivot_longer(!gene, names_to = "cell", values_to = "count") %>%
+    left_join(meta) %>%
+    group_by(gene, {{group1}}, {{group2}}) %>%
+    summarise(percentage = mean(count >0)) %>%
+    tidyr::pivot_wider(names_from = c({{group1}}, {{group2}}), 
+                       values_from= percentage,
+                       names_sep="|")
+  
+  percent_mat<- count_df[, -1] %>% as.matrix()
+  rownames(percent_mat)<- count_df$gene
+  
+  if (!identical(dim(exp_mat), dim(percent_mat))) {
+    stop("the dimension of the two matrice should be the same!")
+  }
+  
+  if(! all.equal(colnames(exp_mat), colnames(percent_mat))) {
+    stop("column names of the two matrice should be the same!")
+  }
+  
+  if(! all.equal(rownames(exp_mat), rownames(percent_mat))) {
+    stop("column names of the two matrice should be the same!")
+  }
+  return(list(exp_mat = exp_mat, percent_mat = percent_mat))
+}
+
+layer_fun2 = function(j, i, x, y, w, h, fill){
+  grid.rect(x = x, y = y, width = w, height = h, 
+            gp = gpar(col = "gray", fill = NA))
+  grid.circle(x=x,y=y,
+              r= sqrt(pindex(mat2$percent_mat, i, j)) * unit(4, "mm"),
+              gp = gpar(fill = col_fun(pindex(mat2$exp_mat, i, j)), col = NA))}
+
+col_fun<-  circlize::colorRamp2(c(0, 2, 1), c("#FDE725FF", "#238A8DFF", "#440154FF"))
+col_fun<-  circlize::colorRamp2(c(0, 2, 5),c("#006699", "#D9D9D9", "#CC0000"))
+col_fun<-  circlize::colorRamp2(c(0, 1, 2),c("#006699", "#D9D9D9", "#CC0000"))
+col_fun<-  circlize::colorRamp2(c(0, 0.4, 0.1), c("#FDE725FF", "#238A8DFF", "#440154FF"))
+col_fun<-  circlize::colorRamp2(c(0, 1, 0.5), c("#FDE725FF", "#238A8DFF", "#440154FF"))
+
+col_fun<-  circlize::colorRamp2(c(0, 2, 5), c("#FDE725FF", "#238A8DFF", "#440154FF"))
+
+lgd_list = list(
+  Legend( labels = c(0, 10, 25, 50, 75), title = "percentage",
+          graphics = list(
+            function(x, y, w, h) grid.circle(x = x, y = y, r = 0  * unit(4, "mm"),
+                                             gp = gpar(fill = "black")),
+            function(x, y, w, h) grid.circle(x = x, y = y, r = sqrt(0.1)  * unit(4, "mm"),
+                                             gp = gpar(fill = "black")),
+            function(x, y, w, h) grid.circle(x = x, y = y, r = sqrt(0.25) * unit(4, "mm"),
+                                             gp = gpar(fill = "black")),
+            function(x, y, w, h) grid.circle(x = x, y = y, r = sqrt(0.5) * unit(4, "mm"),
+                                             gp = gpar(fill = "black")),
+            function(x, y, w, h) grid.circle(x = x, y = y, r = sqrt(0.75) * unit(4, "mm"),
+                                             gp = gpar(fill = "black"))),
+          row_gap = unit(2.5, "mm")
+  ))
+
+levels(seurat_object$cell_type)
+
+# Reorder the levels
+combined$age <- factor(combined$age, levels = c("young", "old"))
+
+cdkn_genes <- grep("^CDKN", rownames(adata_Seurat), value = TRUE)
+
+f <- c("hIL-1alpha", "CXCR3", "IL6", "IL8", "IP10")
+f <- c("p21", "p16", "BCL2", "H2A.X")
+f <- c("p21", "p16", "BCL2", "PCNA")
+
+
+f <- ('CDKN1B')
+
+mat2<- GetMatrixFromSeuratByGroupMulti(obj= adata_Seurat, features =f, immcelltype3 , young_or_old)
+hp2<- Heatmap(mat2$exp_mat,
+              heatmap_legend_param=list(title= "expression"),
+              column_title = "Immune cells", 
+              col=col_fun,
+              rect_gp = gpar(type = "none"),
+              layer_fun = layer_fun2,
+              row_names_gp = gpar(fontsize = 8),
+              border = "black",
+              cluster_rows = FALSE, 
+              cluster_columns = FALSE,
+              row_names_side  = "left")
+
+
+draw(hp2, annotation_legend_list = lgd_list, ht_gap = unit(1, "cm"),
+     annotation_legend_side = "right")
+
+
+svg("xenium_oldyoung_immp27dot.svg", width = 8, height = 5)  # Open PNG device
+draw(hp2, annotation_legend_list = lgd_list, 
+     ht_gap = unit(1, "cm"), annotation_legend_side = "right")
+dev.off() 
+
+
+ggsave(filename = "xenium_oldyoung_immp21dot.svg", device = "svg", width=8, height=5, dpi=1000)  # Works fin
+ggsave(filename = "xenium_oldyoung_immp16dot.svg", device = "svg", width=8, height=5, dpi=1000)  # Works fine
+
+SaveH5Seurat(adata_Seurat, filename = "a.h5Seurat")
+Convert("a.h5Seurat", dest = "h5ad")
+
+```
+```{r}
+library(readxl)
+sasp_set = read_excel("//mfad/researchmn/PHYS-BIOMED-ENG/PASSOS/SHARED/Yeaeun/ana/RSC/Gene_sets.xlsx", sheet = "SASP") 
+Idents(adata_Seurat) <- 'sencelltype'
+f <- sasp_set$target
+
+sub <- subset(adata_Seurat, subset = young_or_old == 'old')
+types <- c("p21+", "p16+/p21+", "p16+")
+sub <- subset(sub, subset = sencelltype %in% types)
+
+
+mat2<- GetMatrixFromSeuratByGroupMulti(obj= sub, features =sasp_set$target, sencelltype , young_or_old)
+hp2<- Heatmap(mat2$exp_mat,
+              heatmap_legend_param=list(title= "expression"),
+              column_title = "SASP in senescent cells", 
+              col=col_fun,
+              rect_gp = gpar(type = "none"),
+              layer_fun = layer_fun2,
+              row_names_gp = gpar(fontsize = 8),
+              border = "black",
+              cluster_rows = FALSE, 
+              cluster_columns = FALSE,
+              row_names_side  = "left")
+
+
+draw(hp2, annotation_legend_list = lgd_list, ht_gap = unit(1, "cm"),
+     annotation_legend_side = "right")
+
+
+Idents(sub) <- 'sencelltype'
+DotPlot(sub, features = f, dot.scale=10, dot.min = 0.01 , scale=TRUE)+scale_colour_gradient2(low="#006699", mid="#D9D9D9", high="#CC0000")+theme(axis.text.y=element_text(size=14), axis.title = element_blank(), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=14), axis.line = element_blank())+geom_point(aes(size=pct.exp), shape = 21, colour="black", stroke=0.5)+scale_y_discrete(limits=rev)
+
+
+ggsave(filename = "xen_dot.svg", device = "svg", width=14, height=4, dpi=1000)  # Works fine
+
+Idents(adata_Seurat) <- 'young_or_old'
+DotPlot(adata_Seurat, features = f, dot.scale=10, dot.min = 0.01 , scale=TRUE)+scale_colour_gradient2(low="#006699", mid="#D9D9D9", high="#CC0000")+theme(axis.text.y=element_text(size=14), axis.title = element_blank(), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=14), axis.line = element_blank())+geom_point(aes(size=pct.exp), shape = 21, colour="black", stroke=0.5)+scale_y_discrete(limits=rev)
+
+remotes::install_github("PMBio/MuDataSeurat")
+MuDataSeurat::WriteH5AD(adata_Seurat, "xenium_r.h5ad")
+
+
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
